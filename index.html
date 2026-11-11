@@ -505,6 +505,9 @@ const officialAlert = {}; // key -> true/false (з офіційних джере
 const stickyAlert = {};   // key -> true: тривога тримається на карті ДО офіційного відбою
 let officialSource = "";
 const oblastLayers = {};
+/* Повні межі областей і районів (OpenStreetMap), зібрані заздалегідь у ukraine.json:
+   { oblasts: {ключ: геометрія}, raions: {"Назва район": геометрія} }. Якщо файлу немає — запасні шляхи. */
+const UKR = fetch("ukraine.json").then(r => r.ok ? r.json() : null).catch(() => null);
 
 function oblastStyle(key) {
   const s = oblastState[key];
@@ -575,7 +578,8 @@ function recomputeOblastStates() {
   updateOblastStyles();
 }
 
-function loadOblasts() {
+async function loadOblasts() {
+  const ukr = await UKR;
   let loaded = 0;
   const outerRings = [];   // зовнішні контури 3 областей — для затемнення решти
   let unionBounds = null;  // спільні межі 3 областей
@@ -584,7 +588,8 @@ function loadOblasts() {
     const ckey = "geo1:" + o.geo;
     let cached = null;
     try { cached = JSON.parse(localStorage.getItem(ckey) || "null"); } catch (e) {}
-    (cached ? Promise.resolve(cached)
+    (ukr && ukr.oblasts && ukr.oblasts[o.key] ? Promise.resolve(ukr.oblasts[o.key])
+      : cached ? Promise.resolve(cached)
       : fetch("https://raw.githubusercontent.com/EugeneBorshch/ukraine_geojson/master/" + o.geo)
           .then(r => r.json())
           .then(gj => { try { localStorage.setItem(ckey, JSON.stringify(gj)); } catch (e) {} return gj; }))
@@ -1309,9 +1314,14 @@ function drawRaions(air) {
   raionWorker();
 }
 
+let ukrMerged = false;
 async function refreshRaions() {
   if (document.hidden) return;
   const box = $("raions");
+  if (!ukrMerged) {   // готові межі районів із ukraine.json — одразу, без запитів до Nominatim
+    const u = await UKR; ukrMerged = true;
+    if (u && u.raions) for (const k in u.raions) if (raionGeo[k] == null) raionGeo[k] = u.raions[k];
+  }
   const raw = await fetchViaProxy("https://api.dimap.live/api/alerts", t => t.trim().startsWith("["));
   if (!raw) { box.innerHTML = "⚠ Тривоги по районах: джерело недоступне"; return; }
   let rows;
