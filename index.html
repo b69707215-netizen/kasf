@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Карта загроз у реальному часі — Дніпропетровська, Харківська, Запорізька обл. (з Telegram)</title>
+<title>Карта тривог України у реальному часі (з Telegram)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root {
@@ -44,7 +44,7 @@
     border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600;
   }
   .badge.alert { color: #ff6b6b; border-color: #5a2530; }
-  .badge.clear { color: #63d68f; border-color: #245038; }
+  .badge.clear { color: #e8c94f; border-color: #5a4b1a; }
   .badge.nodata { color: var(--muted); }
 
   .controls { display: flex; gap: 8px; margin-top: 10px; }
@@ -103,6 +103,7 @@
     font-size: 24px; text-shadow: 0 0 8px #ff4040, 0 0 4px #000;
     animation: pulse 1.2s infinite;
   }
+  .plane-marker { background: none; border: none; }
   .track-label {
     background: none; border: none;
     color: #ffd9a0; font-size: 11px; font-weight: 600;
@@ -140,7 +141,7 @@
 <div id="app">
   <aside id="sidebar">
     <header>
-      <h1><span class="flag">🇺🇦</span> Карта загроз — Дніпро/Харків/Запоріжжя</h1>
+      <h1><span class="flag">🇺🇦</span> Карта тривог України</h1>
       <div class="sub">Telegram-канали + офіційні тривоги · оновлення кожні 30 сек</div>
       <div class="badges">
         <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
@@ -328,7 +329,50 @@ const PLACES = [
   { name: "Токмак",              ll: [47.250, 35.700], v: ["токмак"] },
   { name: "Гуляйполе",           ll: [47.655, 36.275], v: ["гуляйполе"] },
   { name: "Бердянськ",           ll: [46.755, 36.798], v: ["бердянск", "бердянськ"] },
-  { name: "Кам'янка-Дніпровська",ll: [47.480, 34.385], v: ["кам'янка-дніпров", "каменка-днепров"] }
+  { name: "Кам'янка-Дніпровська",ll: [47.480, 34.385], v: ["кам'янка-дніпров", "каменка-днепров"] },
+  // Інші області — обласні центри та міста, які часто згадуються
+  { name: "Київ",                ll: [50.450, 30.523], v: ["київ", "киев"] },
+  { name: "Одеса",               ll: [46.478, 30.733], v: ["одес"] },
+  { name: "Львів",               ll: [49.842, 24.032], v: ["львів", "львов"] },
+  { name: "Миколаїв",            ll: [46.975, 31.995], v: ["миколаїв", "николаев"] },
+  { name: "Херсон",              ll: [46.636, 32.617], v: ["херсон"] },
+  { name: "Полтава",             ll: [49.589, 34.551], v: ["полтав"] },
+  { name: "Суми",                ll: [50.907, 34.799], v: [" суми", " сумах", " сумам", " сумы"] },
+  { name: "Чернігів",            ll: [51.494, 31.294], v: ["чернігів", "чернигов"] },
+  { name: "Черкаси",             ll: [49.444, 32.060], v: ["черкас"] },
+  { name: "Житомир",             ll: [50.254, 28.658], v: ["житомир"] },
+  { name: "Вінниця",             ll: [49.237, 28.467], v: ["вінниц", "винниц"] },
+  { name: "Рівне",               ll: [50.620, 26.251], v: [" рівне", " ровно"] },
+  { name: "Луцьк",               ll: [50.748, 25.324], v: ["луцьк", "луцк"] },
+  { name: "Тернопіль",           ll: [49.567, 25.600], v: ["тернопіл", "тернопол"] },
+  { name: "Хмельницький",        ll: [49.422, 26.997], v: ["хмельницьк", "хмельницк"] },
+  { name: "Івано-Франківськ",    ll: [48.923, 24.711], v: ["івано-франківськ", "ивано-франковск"] },
+  { name: "Ужгород",             ll: [48.621, 22.288], v: ["ужгород"] },
+  { name: "Чернівці",            ll: [48.292, 25.935], v: ["чернівц", "черновц"] },
+  { name: "Кропивницький",       ll: [48.508, 32.262], v: ["кропивницьк", "кировоград", "кіровоград"] },
+  { name: "Кременчук",           ll: [49.065, 33.410], v: ["кременчу"] },
+  { name: "Миргород",            ll: [49.968, 33.607], v: ["миргород"] },
+  { name: "Біла Церква",         ll: [49.797, 30.125], v: ["біла церкв", "белая церков"] },
+  { name: "Бровари",             ll: [50.511, 30.790], v: ["бровар"] },
+  { name: "Бориспіль",           ll: [50.352, 30.955], v: ["бориспіл", "борисполь"] },
+  { name: "Ніжин",               ll: [51.048, 31.886], v: ["ніжин", "нежин"] },
+  { name: "Прилуки",             ll: [50.594, 32.388], v: ["прилук"] },
+  { name: "Конотоп",             ll: [51.242, 33.202], v: ["конотоп"] },
+  { name: "Шостка",              ll: [51.866, 33.480], v: ["шостк"] },
+  { name: "Охтирка",             ll: [50.311, 34.899], v: ["охтирк", "ахтырк"] },
+  { name: "Умань",               ll: [48.749, 30.222], v: ["умань", "уман"] },
+  { name: "Ізмаїл",              ll: [45.351, 28.837], v: ["ізмаїл", "измаил"] },
+  { name: "Чорноморськ",         ll: [46.301, 30.655], v: ["чорноморськ"] },
+  { name: "Вознесенськ",         ll: [47.568, 31.334], v: ["вознесенськ"] },
+  { name: "Очаків",              ll: [46.608, 31.541], v: ["очаків", "очаков"] },
+  { name: "Нова Каховка",        ll: [46.755, 33.370], v: ["нова каховк", "новая каховк"] },
+  { name: "Краматорськ",         ll: [48.739, 37.584], v: ["краматорськ", "краматорск"] },
+  { name: "Слов'янськ",          ll: [48.853, 37.606], v: ["слов'янськ", "славянск"] },
+  { name: "Бахмут",              ll: [48.595, 38.000], v: ["бахмут"] },
+  { name: "Костянтинівка",       ll: [48.527, 37.708], v: ["костянтинівк", "константиновк"] },
+  { name: "Дружківка",           ll: [48.621, 37.527], v: ["дружківк", "дружковк"] },
+  { name: "Лиман",               ll: [48.987, 37.811], v: [" лиман"] },
+  { name: "Маріуполь",           ll: [47.131, 37.564], v: ["маріупол", "мариупол"] }
 ];
 
 /* Розбір поста: ГДЕ дрон зараз і КУДИ летить (можлива ціль) */
@@ -371,12 +415,17 @@ CHANNELS.forEach(c => state[c.id] = { status: "loading", state: "nodata", msgs: 
 /* ==================== Карта ==================== */
 const map = L.map("map", {
   zoomControl: true,
-  maxBounds: [[45.9, 32.9], [51.2, 38.6]],   // тільки 3 наші регіони, не вся Україна
-  maxBoundsViscosity: 0.8
-}).setView([48.65, 36.0], 7);
+  maxBounds: [[43.0, 20.0], [53.5, 42.0]],   // вся Україна з запасом
+  maxBoundsViscosity: 0.8,
+  minZoom: 5
+}).setView([48.9, 31.2], 6);
 // справжні карти: СУПУТНИК за замовчуванням + темна схема (Esri/OSM, без ключів)
 const satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
   attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 18
+});
+// чиста темна карта (за замовчуванням): мінімум зайвого, добре видно області й цілі
+const darkLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+  attribution: "Esri", maxZoom: 16
 }).addTo(map);
 const osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: "&copy; OpenStreetMap", maxZoom: 19, className: "osm-dark"
@@ -390,7 +439,7 @@ const labelsUk = L.tileLayer("https://mt{s}.google.com/vt/lyrs=h&hl=uk&gl=UA&x={
   pane: "labels", subdomains: "0123", maxZoom: 20, attribution: "Підписи: Google"
 }).addTo(map);
 L.control.layers(
-  { "🛰 Супутник (реальна)": satLayer, "🗺 Схема (темна)": osmLayer },
+  { "🌑 Темна (чиста)": darkLayer, "🛰 Супутник (реальна)": satLayer, "🗺 Схема (OSM)": osmLayer },
   { "🏙 Назви українською": labelsUk },
   { position: "topright" }
 ).addTo(map);
@@ -406,9 +455,31 @@ document.getElementById("map").style.background = "#11151c";
    КОНТУРИ ОБЛАСТЕЙ — закрашуються червоним при тривозі
    ========================================================= */
 const OBLASTS = [
-  { key: "dnipro",      name: "Дніпропетровська область", geo: "UA_12_Dnipropetrovska.geojson" },
-  { key: "kharkiv",     name: "Харківська область",       geo: "UA_63_Kharkivska.geojson" },
-  { key: "zaporizhzhia",name: "Запорізька область",       geo: "UA_23_Zaporizka.geojson" }
+  { key: "dnipro",       name: "Дніпропетровська область", geo: "UA_12_Dnipropetrovska.geojson", stems: ["дніпропетровськ","днепропетровск"], home: true },
+  { key: "kharkiv",      name: "Харківська область",       geo: "UA_63_Kharkivska.geojson",      stems: ["харківськ","харьковск"], home: true },
+  { key: "zaporizhzhia", name: "Запорізька область",       geo: "UA_23_Zaporizka.geojson",       stems: ["запорізьк","запорожск"], home: true },
+  { key: "vinnytsia",    name: "Вінницька область",        geo: "UA_05_Vinnytska.geojson",       stems: ["вінницьк","винницк"] },
+  { key: "volyn",        name: "Волинська область",        geo: "UA_07_Volynska.geojson",        stems: ["волинськ","волынск"] },
+  { key: "luhansk",      name: "Луганська область",        geo: "UA_09_Luhanska.geojson",        stems: ["луганськ","луганск"] },
+  { key: "donetsk",      name: "Донецька область",         geo: "UA_14_Donetska.geojson",        stems: ["донецьк","донецк"] },
+  { key: "zhytomyr",     name: "Житомирська область",      geo: "UA_18_Zhytomyrska.geojson",     stems: ["житомирськ","житомирск"] },
+  { key: "zakarpattia",  name: "Закарпатська область",     geo: "UA_21_Zakarpatska.geojson",     stems: ["закарпатськ","закарпатск"] },
+  { key: "ivanofrankivsk", name: "Івано-Франківська область", geo: "UA_26_Ivano_Frankivska.geojson", stems: ["івано-франківськ","ивано-франковск"] },
+  { key: "kyiv",         name: "Київська область",         geo: "UA_32_Kyivska.geojson",         stems: ["київськ","киевск","м. київ"], alt: ["м. Київ"] },
+  { key: "kirovohrad",   name: "Кіровоградська область",   geo: "UA_35_Kirovohradska.geojson",   stems: ["кіровоградськ","кировоградск"] },
+  { key: "crimea",       name: "Автономна Республіка Крим", geo: "UA_43_Avtonomna_Respublika_Krym.geojson", stems: ["крим","крым"] },
+  { key: "lviv",         name: "Львівська область",        geo: "UA_46_Lvivska.geojson",         stems: ["львівськ","львовск"] },
+  { key: "mykolaiv",     name: "Миколаївська область",     geo: "UA_48_Mykolaivska.geojson",     stems: ["миколаївськ","николаевск"] },
+  { key: "odesa",        name: "Одеська область",          geo: "UA_51_Odeska.geojson",          stems: ["одеськ","одесск"] },
+  { key: "poltava",      name: "Полтавська область",       geo: "UA_53_Poltavska.geojson",       stems: ["полтавськ","полтавск"] },
+  { key: "rivne",        name: "Рівненська область",       geo: "UA_56_Rivnenska.geojson",       stems: ["рівненськ","ровенск"] },
+  { key: "sumy",         name: "Сумська область",          geo: "UA_59_Sumska.geojson",          stems: ["сумськ","сумск"] },
+  { key: "ternopil",     name: "Тернопільська область",    geo: "UA_61_Ternopilska.geojson",     stems: ["тернопільськ","тернопольск"] },
+  { key: "kherson",      name: "Херсонська область",       geo: "UA_65_Khersonska.geojson",      stems: ["херсонськ","херсонск"] },
+  { key: "khmelnytskyi", name: "Хмельницька область",      geo: "UA_68_Khmelnytska.geojson",     stems: ["хмельницьк","хмельницк"] },
+  { key: "cherkasy",     name: "Черкаська область",        geo: "UA_71_Cherkaska.geojson",       stems: ["черкаськ","черкасск"] },
+  { key: "chernihiv",    name: "Чернігівська область",     geo: "UA_74_Chernihivska.geojson",    stems: ["чернігівськ","черниговск"] },
+  { key: "chernivtsi",   name: "Чернівецька область",      geo: "UA_77_Chernivetska.geojson",    stems: ["чернівецьк","черновицк"] }
 ];
 const oblastState = {};   // key -> "alert" | "clear" | "nodata"
 const officialAlert = {}; // key -> true/false (з офіційних джерел)
@@ -513,19 +584,8 @@ function loadOblasts() {
         (gj.features || []).forEach(f => collect(f.geometry));
         loaded++;
         if (loaded === OBLASTS.length && unionBounds) {
-          // 1) затемнюємо все, що поза нашими 3 областями
-          map.createPane("mask");
-          map.getPane("mask").style.zIndex = 350;
-          map.getPane("mask").style.pointerEvents = "none";
-          const world = [[-85, -180], [85, -180], [85, 180], [-85, 180]];
-          L.polygon([world, ...outerRings], {
-            pane: "mask", stroke: false,
-            fillColor: "#11151c", fillOpacity: 1, interactive: false
-          }).addTo(map);
-          // 2) карта видно/обмежена тільки нашими областями
+          // вся Україна: вписуємо карту в межі всіх областей
           map.fitBounds(unionBounds, { padding: [8, 8] });
-          map.setMaxBounds(unionBounds.pad(0.02));
-          map.options.maxBoundsViscosity = 1.0;
         }
         recomputeOblastStates();
       })
@@ -584,6 +644,20 @@ function drawThreatCone(g, from, to) {
   }
 }
 
+/* Літачок-стрілка: повернутий у бік цілі. Колір — за типом загрози */
+function planeIcon(type, deg) {
+  const color = type === "missile" ? "#ff4040" : type === "kab" ? "#ffd24a" : type === "aviation" ? "#8ec8ff" : "#ff9b3d";
+  const shape = type === "aviation"
+    ? "M12 1 L14 9 L23 14 L23 16 L14 13 L13 20 L16 22 L16 23 L12 22 L8 23 L8 22 L11 20 L10 13 L1 16 L1 14 L10 9 Z"  // літак
+    : "M12 2 L21 21 L12 17 L3 21 Z";                                                                             // дрон/ракета
+  return L.divIcon({
+    className: "plane-marker",
+    html: `<svg width="28" height="28" viewBox="0 0 24 24" style="transform:rotate(${deg}deg);filter:drop-shadow(0 0 4px #000)">` +
+          `<path d="${shape}" fill="${color}" stroke="#000" stroke-width="1"/></svg>`,
+    iconSize: [28, 28], iconAnchor: [14, 14]
+  });
+}
+
 function updateTargets(ch) {
   const st = state[ch.id];
   if (!targetGroups[ch.id]) {
@@ -604,13 +678,14 @@ function updateTargets(ch) {
     // можлива ціль: з того ж поста, або остання відома
     let tgt = st.targets.find(t => t.role === "target" && t.msg.t === pos.msg.t);
     if (!tgt && targets.length) tgt = targets[targets.length - 1];
+    const rot = tgt ? bearingTo(pos.ll, tgt.ll) : 0;   // літачок «дивиться» на ціль
     if (tgt) linkedTargets.add(tgt.name + "|" + tgt.msg.t);    // підпис місця біля точки
     L.marker(pos.ll, {
       icon: L.divIcon({ className: "track-label", html: pos.name, iconSize: [140, 14] }),
       interactive: false, zIndexOffset: 500
     }).addTo(g);
     L.marker(pos.ll, {
-      icon: L.divIcon({ className: "target-marker", html: icon, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      icon: planeIcon(th.id, rot),
       zIndexOffset: 1000
     })
       .bindPopup(
@@ -853,16 +928,21 @@ function showErr(text) {
 function render() {
   updateTimestamp();
   // бейджі
-  let a = 0, c = 0, n = 0;
+  // РЕАЛЬНІ показники: рахуємо лише те, що справді відомо з джерел
+  const known = OBLASTS.filter(o => officialAlert[o.key] !== undefined).length;
+  const redNow = OBLASTS.filter(o => oblastState[o.key] === "alert").length;
+  const yellowNow = OBLASTS.filter(o => oblastState[o.key] === "threat").length;
+  const online = CHANNELS.filter(ch => state[ch.id].status === "ok").length;
+  const fresh = CHANNELS.filter(ch => { const s = state[ch.id]; return s.status === "ok" && s.lastTime && Date.now() - s.lastTime <= FRESH_MS; }).length;
+  const seen = new Set();
   CHANNELS.forEach(ch => {
     const st = state[ch.id];
-    if (st.state === "alert") a++;
-    else if (st.state === "clear") c++;
-    else n++;
+    if (st.state === "alert" && st.targets) st.targets.forEach(t => seen.add(t.name + "|" + t.role));
   });
-  $("bAlert").textContent = `🔴 Тривога: ${a}`;
-  $("bClear").textContent = `🟢 Спокій: ${c}`;
-  $("bNoData").textContent = `⚪ Немає даних: ${n}`;
+  $("bAlert").textContent = `🔴 Тривога: ${redNow} з ${OBLASTS.length} обл.`;
+  $("bAlert").title = `Офіційні дані є по ${known} з ${OBLASTS.length} областей`;
+  $("bClear").textContent = `🟡 Загроза (канали): ${yellowNow}`;
+  $("bNoData").textContent = `📡 Канали: ${online}/${CHANNELS.length} онлайн · ${fresh} зі свіжими постами · 🎯 ${seen.size}`;
 
   // лічильники загроз по типах — що саме летить зараз
   const counts = {};
@@ -902,7 +982,9 @@ function render() {
     const el = $("ch-" + ch.id); if (!el) return;
     const st = state[ch.id];
     const dot = el.querySelector(".dot");
-    dot.className = "dot " + (st.status === "ok" ? st.state : (st.status === "loading" ? "loading" : "nodata"));
+    // зелений — лише коли є свіжі пости й там спокій; немає свіжих постів = сірий (даних немає), а не «спокій»
+    const isFresh = st.lastTime && Date.now() - st.lastTime <= FRESH_MS;
+    dot.className = "dot " + (st.status === "ok" ? (isFresh ? st.state : "nodata") : (st.status === "loading" ? "loading" : "nodata"));
     el.classList.toggle("alert-zone", st.state === "alert");
     el.querySelector(".time").textContent = st.lastTime ? fmtTime(st.lastTime) : "";
     const tl = el.querySelector(".threat-line");
@@ -960,7 +1042,8 @@ async function refreshOfficial() {
       const act = (j.alerts || []).filter(x => x.alert_type === "air_raid" && !x.finished_at);
       rows = {};
       OBLASTS.forEach(o => {
-        const a = act.filter(x => x.location_oblast === o.name);
+        const names = [o.name, ...(o.alt || [])];
+        const a = act.filter(x => names.includes(x.location_oblast));
         rows[o.key] = { alert: a.length > 0, changed: a.length ? a[0].started_at : null };
       });
       officialSource = "alerts.in.ua (офіційне API)";
@@ -1009,9 +1092,7 @@ async function refreshOfficial() {
         if (m.t < cutoff || !m.txt) return;
         const low = m.txt.toLowerCase();
         OBLASTS.forEach(o => {
-          const hit = ["дніпропетровськ","днепропетровск","харківськ","харьков","запорізьк","запорожск","запорож"]
-            .find(v => low.includes(v) && (o.key === "dnipro" ? v.startsWith("дн") : o.key === "kharkiv" ? v.startsWith("х") : v.startsWith("з")));
-          if (!hit) return;
+          if (!o.stems.some(v => low.includes(v))) return;
           const isClear = RE_CLEAR.test(m.txt);
           const isAlert = /(тривог|тревог)/i.test(m.txt) && !isClear;
           if (isAlert || isClear) last[o.key] = { alert: isAlert, t: m.t };
@@ -1037,20 +1118,20 @@ async function refreshOfficial() {
           : null;
       }
       const changed = rows[o.key] && rows[o.key].changed ? new Date(rows[o.key].changed) : null;
-      return off
-        ? `🔴 <b>${short}</b> — 🔔 СИРЕНА УВІМКНЕНА${changed ? " (з " + fmtTime(changed.getTime()) + ")" : ""}`
-        : `🟢 ${short} — 🔔 сирена вимкнена`;
+      if (off) return `🔴 <b>${short}</b> — 🔔 СИРЕНА УВІМКНЕНА${changed ? " (з " + fmtTime(changed.getTime()) + ")" : ""}`;
+      return o.home ? `🟢 ${short} — 🔔 сирена вимкнена` : null;   // спокійні чужі області не показуємо
     }).filter(Boolean);
-    box.innerHTML = "<b>Офіційно:</b><br>" + lines.join("<br>") +
+    const totalAlert = OBLASTS.filter(o => officialAlert[o.key] === true).length;
+    box.innerHTML = `<b>Офіційно:</b> тривога в ${totalAlert} з ${OBLASTS.length} областей<br>` + lines.join("<br>") +
       `<br><span style="color:#6ab0f3;font-size:10px">✅ підключено: ${officialSource} · оновлено ${new Date().toLocaleTimeString("uk-UA")}</span>`;
     // компактна строка сирени прямо на карті
-    const mini = OBLASTS.map(o => {
+    const mini = OBLASTS.filter(o => o.home).map(o => {
       const k = o.name.replace(" область", "");
       const short = k.slice(0, 4) + ".";
       return officialAlert[o.key] === undefined ? `${short}:⚪` : officialAlert[o.key] ? `<span style="color:#ff6b6b">${short}:🔔🔴</span>` : `${short}:🟢`;
     }).join(" · ");
     const om = $("officialMini");
-    if (om) om.innerHTML = "🔔 Сирена: " + mini + ` <span style="color:#8b93a5">(${officialSource}, ${new Date().toLocaleTimeString("uk-UA")})</span>`;
+    if (om) om.innerHTML = "🔔 Сирена: " + mini + ` · Україна: 🔴${totalAlert}` + ` <span style="color:#8b93a5">(${officialSource}, ${new Date().toLocaleTimeString("uk-UA")})</span>`;
   } else {
     box.innerHTML = "⚠ ОФІЦІЙНІ ДАНІ НЕДОСТУПНІ — стан сирени невідомий (спроба за хвилину)";
     officialSource = "";
@@ -1097,6 +1178,7 @@ CHANNELS.forEach((ch, i) => {
 });
 refreshOfficial();
 setInterval(refreshOfficial, 45000);
+setInterval(render, 15000);   // показники «свіжості» оновлюються з часом, навіть без нових постів
 </script>
 </body>
 </html>
