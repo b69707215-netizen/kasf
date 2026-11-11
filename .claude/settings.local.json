@@ -1,1 +1,0 @@
-﻿{"permissions":{"allow":["PowerShell(Invoke-WebRequest https://api.dimap.live/*)","Bash(curl https://dimap.live/*)","Bash(grep:*)"]}}
