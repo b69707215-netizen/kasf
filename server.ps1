@@ -3,7 +3,7 @@ Add-Type -AssemblyName System.Net
 $root = $PSScriptRoot
 $port = 8802
 # дозволені хости для /proxy (щоб сервер не став відкритим проксі)
-$allowedHosts = @("t.me", "alerts.com.ua", "ubilling.net.ua")
+$allowedHosts = @("t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live")
 
 $listener = New-Object System.Net.HttpListener
 $listener.Prefixes.Add("http://127.0.0.1:$port/")

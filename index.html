@@ -154,6 +154,7 @@
         <button id="btnRefresh">⟳ Оновити</button>
       </div>
       <div id="official" class="official">⏳ Офіційні тривоги: завантаження…</div>
+      <div id="raions" class="official">⏳ Тривоги по районах: завантаження…</div>
     </header>
     <div id="channels"></div>
     <div id="footer">
@@ -942,7 +943,7 @@ function render() {
   $("bAlert").textContent = `🔴 Тривога: ${redNow} з ${OBLASTS.length} обл.`;
   $("bAlert").title = `Офіційні дані є по ${known} з ${OBLASTS.length} областей`;
   $("bClear").textContent = `🟡 Загроза (канали): ${yellowNow}`;
-  $("bNoData").textContent = `📡 Канали: ${online}/${CHANNELS.length} онлайн · ${fresh} зі свіжими постами · 🎯 ${seen.size}`;
+  $("bNoData").textContent = `📡 Канали: ${online}/${CHANNELS.length} онлайн · ${fresh} зі свіжими постами · 🎯 ${seen.size + dimapCount}`;
 
   // лічильники загроз по типах — що саме летить зараз
   const counts = {};
@@ -1141,6 +1142,114 @@ async function refreshOfficial() {
   recomputeOblastStates();
 }
 
+/* ==================== Цілі з dimap.live (з дозволу авторів) ==================== */
+const dimapGroup = L.layerGroup().addTo(map);
+let dimapCount = 0;
+const DIMAP_TYPES = {
+  shahed: "Шахед", reactive_shahed: "Реактивний шахед", avia: "Авіація", fpv: "FPV/дрон"
+};
+function dimapKind(type) {
+  if (type === "avia") return "aviation";
+  if (/missile|rocket|cruise|ballistic|kalibr|iskander|kinzhal|kh-/i.test(type)) return "missile";
+  if (/kab|glide/i.test(type)) return "kab";
+  return "drone";
+}
+async function refreshDimapTargets() {
+  const raw = await fetchViaProxy("https://api.dimap.live/api/targets", t => t.trim().startsWith("{"));
+  if (!raw) return;
+  let j; try { j = JSON.parse(raw); } catch (e) { return; }
+  if (!Array.isArray(j.targets)) return;
+  dimapGroup.clearLayers();
+  const maxAge = 3 * 60000;   // ціль без оновлень понад 3 хв не показуємо
+  let n = 0;
+  j.targets.forEach(t => {
+    if (!Number.isFinite(t.lat) || !Number.isFinite(t.lng)) return;
+    const seenAt = Date.parse(t.lastSeen);
+    if (seenAt && Date.now() - seenAt > maxAge) return;
+    const kind = dimapKind(t.type || "");
+    const label = DIMAP_TYPES[t.type] || t.type || "Ціль";
+    if (Array.isArray(t.history) && t.history.length > 1) {
+      const pts = t.history.map(p => Array.isArray(p) ? [p[0], p[1]] : (p && Number.isFinite(p.lat) ? [p.lat, p.lng] : null)).filter(Boolean);
+      if (pts.length > 1) L.polyline(pts, { color: "#ff9b3d", weight: 1.5, opacity: 0.6, dashArray: "3 5", interactive: false }).addTo(dimapGroup);
+    }
+    L.marker([t.lat, t.lng], { icon: planeIcon(kind, t.bearing || 0), zIndexOffset: 800 })
+      .bindPopup(`<b>${escapeHtml(label)}</b><br>курс ${Math.round(t.bearing || 0)}° · ${Math.round(t.speed || 0)} км/год` +
+        `<br>📍 ${t.lat.toFixed(3)}, ${t.lng.toFixed(3)}` +
+        (seenAt ? `<br><span style="color:#6ab0f3">${fmtTime(seenAt)}</span>` : "") +
+        `<hr><span style="color:#8b93a5">джерело: dimap.live</span>`)
+      .addTo(dimapGroup);
+    n++;
+  });
+  dimapCount = n;
+  render();
+}
+
+/* ==================== Тривоги по районах (api.dimap.live, з дозволу авторів) ==================== */
+const HOME_RAIONS = new Set([
+  "Дніпровський","Кам'янський","Криворізький","Нікопольський","Новомосковський","Павлоградський","Синельниківський",
+  "Берестинський","Богодухівський","Харківський","Чугуївський","Куп'янський","Лозівський","Ізюмський",
+  "Бердянський","Запорізький","Мелітопольський","Пологівський","Василівський"
+].map(n => n + " район").concat(["м. Запоріжжя"]));
+
+/* Контури районів у тривозі. Межі районів беремо з OpenStreetMap (Nominatim) один раз і
+   зберігаємо в localStorage, щоб не навантажувати сервіс (≤1 запит/сек, по черзі). */
+const raionLayer = L.layerGroup().addTo(map);
+let raionGeo = {};
+try { raionGeo = JSON.parse(localStorage.getItem("raionGeo") || "{}"); } catch (e) {}
+const raionQueue = []; let raionBusy = false, lastAir = [];
+function saveRaionGeo() { try { localStorage.setItem("raionGeo", JSON.stringify(raionGeo)); } catch (e) {} }
+function paintRaions() {
+  raionLayer.clearLayers();
+  lastAir.forEach(r => {
+    const g = raionGeo[r.region];
+    if (!g) return;
+    const red = r.color === "red";
+    L.geoJSON(g, { style: { fillColor: red ? "#a91f1f" : "#c9a227", fillOpacity: red ? 0.5 : 0.4, color: red ? "#ff5a5a" : "#e8c94f", weight: 1.5 } })
+      .bindPopup(`<b>${escapeHtml(r.region)}</b><br>${red ? "🔴 повітряна тривога" : "🟡 загроза"}<br><span style="font-size:11px;color:#8b93a5">джерело: dimap.live</span>`)
+      .addTo(raionLayer);
+  });
+}
+async function raionWorker() {
+  if (raionBusy) return; raionBusy = true;
+  while (raionQueue.length) {
+    const name = raionQueue.shift();
+    if (raionGeo[name] !== undefined) continue;
+    try {
+      const q = encodeURIComponent(name.replace(/^м\.\s*/, "") + ", Україна");
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=jsonv2&polygon_geojson=1&polygon_threshold=0.005&limit=1&countrycodes=ua&accept-language=uk`,
+        { signal: AbortSignal.timeout(20000) });
+      const j = await r.json();
+      const gj = j[0] && j[0].geojson;
+      raionGeo[name] = gj && /Polygon/.test(gj.type) ? gj : null;   // null = межі не знайдено, більше не питаємо
+      saveRaionGeo(); paintRaions();
+    } catch (e) { /* спробуємо наступного разу */ }
+    await new Promise(res => setTimeout(res, 1200));
+  }
+  raionBusy = false;
+}
+function drawRaions(air) {
+  lastAir = air;
+  air.forEach(r => { if (raionGeo[r.region] === undefined && !raionQueue.includes(r.region)) raionQueue.push(r.region); });
+  paintRaions();
+  raionWorker();
+}
+
+async function refreshRaions() {
+  const box = $("raions");
+  const raw = await fetchViaProxy("https://api.dimap.live/api/alerts", t => t.trim().startsWith("["));
+  if (!raw) { box.innerHTML = "⚠ Тривоги по районах: джерело недоступне"; return; }
+  let rows;
+  try { rows = JSON.parse(raw); } catch (e) { box.innerHTML = "⚠ Тривоги по районах: помилка даних"; return; }
+  const air = rows.filter(r => r.alertType === "air" && (r.color === "red" || r.color === "yellow"));   // порожній колір = тривоги немає
+  const red = air.filter(r => r.color === "red"), yellow = air.filter(r => r.color === "yellow");
+  const chip = (r, c) => `<span class="threat-chip" style="background:${c === "red" ? "#5a2530" : "#4d4216"};color:${c === "red" ? "#ffb0b0" : "#f1dc8a"};margin:2px 2px 0 0">${escapeHtml(r.region.replace(" район", " р-н"))}</span>`;
+  drawRaions(air);
+  const mine = air.filter(r => HOME_RAIONS.has(r.region));
+  box.innerHTML = `<b>Районів у тривозі:</b> 🔴 ${red.length} · 🟡 ${yellow.length}<br>` +
+    (mine.length ? `<span style="color:#8b93a5;font-size:11px">Ваші області:</span><br>` + mine.map(r => chip(r, r.color)).join("") : `<span style="color:#63d68f;font-size:12px">У районах Дніпропетровщини/Харківщини/Запоріжжя тривоги немає</span>`) +
+    `<br><span style="color:#6ab0f3;font-size:10px">✅ джерело: dimap.live · ${new Date().toLocaleTimeString("uk-UA")}</span>`;
+}
+
 /* ==================== Запуск ==================== */
 function updateTimestamp() {
   $("timestamp").innerHTML = "Станом на <b>" +
@@ -1178,7 +1287,11 @@ CHANNELS.forEach((ch, i) => {
 });
 refreshOfficial();
 setInterval(refreshOfficial, 45000);
-setInterval(render, 15000);   // показники «свіжості» оновлюються з часом, навіть без нових постів
+refreshRaions();
+setInterval(refreshRaions, 30000);
+refreshDimapTargets();
+setInterval(refreshDimapTargets, 15000);
+setInterval(render, 15000);  // показники «свіжості» оновлюються з часом, навіть без нових постів
 </script>
 </body>
 </html>
