@@ -130,6 +130,22 @@
     display: inline-block; background: #5a2530; color: #ffb0b0;
     border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;
   }
+  /* згортання бічної панелі + мобільна версія */
+  #btnSide {
+    position: absolute; top: 10px; right: 58px; z-index: 1000;
+    width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+    background: rgba(24,29,38,.92); color: var(--text); border: 1px solid var(--border); font-size: 17px;
+  }
+  #btnSide:hover { background: #2b3442; }
+  #sidebar.collapsed { display: none; }
+  /* режим «тільки карта»: прибираємо зайві плашки */
+  #officialMini, .legend, #coords { display: none !important; }
+  @media (max-width: 800px) {
+    #sidebar { position: absolute; inset: 0; width: 100%; z-index: 2000; }
+    #timestamp { font-size: 11px; padding: 4px 8px; }
+    #officialMini { display: none; }
+    .legend { display: none; }
+  }
   .err-banner {
     position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
     z-index: 1000; background: #5a2530; color: #ffd7d7; border-radius: 8px;
@@ -164,6 +180,7 @@
   </aside>
   <main id="mapwrap">
     <div id="map"></div>
+    <button id="btnSide" title="Показати/сховати панель">☰</button>
     <div id="timestamp">Станом на <b>--:--:--</b></div>
     <div id="officialMini" style="position:absolute;top:44px;left:10px;z-index:1000;background:rgba(24,29,38,.92);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:11px;"></div>
     <div id="coords">📍 48.0000, 36.0000</div>
@@ -439,7 +456,7 @@ map.getPane("labels").style.pointerEvents = "none";
 const labelsUk = L.tileLayer("https://mt{s}.google.com/vt/lyrs=h&hl=uk&gl=UA&x={x}&y={y}&z={z}", {
   pane: "labels", subdomains: "0123", maxZoom: 20, attribution: "Підписи: Google"
 }).addTo(map);
-L.control.layers(
+const layersCtl = L.control.layers(
   { "🌑 Темна (чиста)": darkLayer, "🛰 Супутник (реальна)": satLayer, "🗺 Схема (OSM)": osmLayer },
   { "🏙 Назви українською": labelsUk },
   { position: "topright" }
@@ -532,9 +549,13 @@ function recomputeOblastStates() {
     let hasData = official !== undefined;
     let chClassic = false;
     CHANNELS.forEach(ch => {
-      if (ch.oblast !== o.key) return;
       const st = state[ch.id];
       if (st.status !== "ok") return;
+      // якщо в пості названо конкретні області — фарбуємо саме їх (а не «рідну» область каналу)
+      const txt = (st.alertTxt || "").toLowerCase();
+      const mentioned = st.state === "alert" && txt ? OBLASTS.filter(x => x.stems.some(s => txt.includes(s))) : [];
+      const applies = mentioned.length ? mentioned.some(x => x.key === o.key) : ch.oblast === o.key;
+      if (!applies) return;
       hasData = true;
       if (st.state !== "alert") return;
       // класична тривога (ТА/авіація/обстріл) → червона; суті загрози (шахеди/КАБи/ракети) → жовта
@@ -820,7 +841,8 @@ function classify(msgs) {
 
 async function refreshChannel(ch) {
   const st = state[ch.id];
-  if (st.busy) return;            // попереднє оновлення ще триває — пропускаємо
+  if (document.hidden && st.lastTime) return;   // вкладка у фоні — не навантажуємо мережу
+  if (st.busy) return;           // попереднє оновлення ще триває — пропускаємо
   st.busy = true;
   try {
     const html = await fetchViaProxy("https://t.me/s/" + ch.id, t => t.includes("tgme_widget_message"));
@@ -841,6 +863,7 @@ async function refreshChannel(ch) {
     st.state = v.state;
     st.threat = v.threat;
     st.direction = v.direction;
+    st.alertTxt = v.msg ? v.msg.txt : "";
     st.targets = v.tracks;   // треки: позиції дронів + можливі цілі
     st.msgs = msgs.slice(-10);
     st.lastTime = msgs[msgs.length - 1].t;
@@ -1032,6 +1055,7 @@ function officialChangedReact() {
 }
 
 async function refreshOfficial() {
+  if (document.hidden && Object.keys(officialAlert).length) return;
   const box = $("official");
   let rows = null;
 
@@ -1144,6 +1168,7 @@ async function refreshOfficial() {
 
 /* ==================== Цілі з dimap.live (з дозволу авторів) ==================== */
 const dimapGroup = L.layerGroup().addTo(map);
+layersCtl.addOverlay(dimapGroup, "🎯 Цілі (dimap.live)");
 let dimapCount = 0;
 const DIMAP_TYPES = {
   shahed: "Шахед", reactive_shahed: "Реактивний шахед", avia: "Авіація", fpv: "FPV/дрон"
@@ -1155,6 +1180,7 @@ function dimapKind(type) {
   return "drone";
 }
 async function refreshDimapTargets() {
+  if (document.hidden) return;
   const raw = await fetchViaProxy("https://api.dimap.live/api/targets", t => t.trim().startsWith("{"));
   if (!raw) return;
   let j; try { j = JSON.parse(raw); } catch (e) { return; }
@@ -1194,6 +1220,7 @@ const HOME_RAIONS = new Set([
 /* Контури районів у тривозі. Межі районів беремо з OpenStreetMap (Nominatim) один раз і
    зберігаємо в localStorage, щоб не навантажувати сервіс (≤1 запит/сек, по черзі). */
 const raionLayer = L.layerGroup().addTo(map);
+layersCtl.addOverlay(raionLayer, "🟥 Райони в тривозі");
 let raionGeo = {};
 try { raionGeo = JSON.parse(localStorage.getItem("raionGeo") || "{}"); } catch (e) {}
 const raionQueue = []; let raionBusy = false, lastAir = [];
@@ -1235,6 +1262,7 @@ function drawRaions(air) {
 }
 
 async function refreshRaions() {
+  if (document.hidden) return;
   const box = $("raions");
   const raw = await fetchViaProxy("https://api.dimap.live/api/alerts", t => t.trim().startsWith("["));
   if (!raw) { box.innerHTML = "⚠ Тривоги по районах: джерело недоступне"; return; }
@@ -1287,6 +1315,21 @@ CHANNELS.forEach((ch, i) => {
 });
 refreshOfficial();
 setInterval(refreshOfficial, 45000);
+/* панель: ☰ згортає/розгортає; на телефоні за замовчуванням карта на весь екран */
+function toggleSidebar(force) {
+  const sb = $("sidebar");
+  const hide = force === undefined ? !sb.classList.contains("collapsed") : force;
+  sb.classList.toggle("collapsed", hide);
+  setTimeout(() => map.invalidateSize(), 50);
+}
+$("btnSide").onclick = () => toggleSidebar();
+toggleSidebar(true);   // за замовчуванням видно лише карту; панель відкривається кнопкою ☰
+/* повернулися на вкладку — одразу оновлюємо все, не чекаючи таймерів */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  refreshAll(); refreshOfficial(); refreshRaions(); refreshDimapTargets();
+});
+
 refreshRaions();
 setInterval(refreshRaions, 30000);
 refreshDimapTargets();
