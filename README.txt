@@ -12,13 +12,15 @@
 (Можна і просто відкрити index.html — тоді карта спробує читати
 дані через публічні проксі, це менш надійно.)
 
-CLOUDFLARE PAGES (карта в інтернеті, без локального сервера)
-------------------------------------------------------------
-1) dash.cloudflare.com → Workers & Pages → Create → Pages → Connect to Git
-   → обери репозиторій kasf.
-2) Build command: (порожньо), Build output directory: / (корінь).
-3) Папка functions/ автоматично дає /proxy і /alerts (замість server.ps1).
-4) Для офіційного API: Settings → Variables and Secrets → додай секрет
+CLOUDFLARE (карта в інтернеті, без локального сервера)
+------------------------------------------------------
+Проєкт — це Cloudflare Worker зі статикою:
+  public/       — сайт (index.html)
+  src/worker.js — /proxy і /alerts (замість server.ps1)
+  wrangler.jsonc — налаштування (name має збігатися з назвою Worker у кабінеті)
+1) dash.cloudflare.com → Workers & Pages → Create → Import a repository → kasf.
+2) Deploy command: npx wrangler deploy  (залишити за замовчуванням).
+3) Для офіційного API: Settings → Variables and Secrets → секрет
    ALERTS_TOKEN зі своїм токеном alerts.in.ua (в репозиторій токен не кладемо).
 
 ЩО НА КАРТІ

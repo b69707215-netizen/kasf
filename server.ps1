@@ -1,6 +1,7 @@
 Add-Type -AssemblyName System.Net
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$root = $PSScriptRoot
+$base = $PSScriptRoot
+$root = Join-Path $PSScriptRoot "public"   # сайт лежить у public/ (так само його віддає Cloudflare)
 $port = 8802
 # дозволені хости для /proxy (щоб сервер не став відкритим проксі)
 $allowedHosts = @("t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live")
@@ -18,7 +19,7 @@ while ($listener.IsListening) {
 
     if ($path -eq "alerts") {
       # --- офіційне API alerts.in.ua (токен у файлі alerts_token.txt) ---
-      $tokenFile = Join-Path $root "alerts_token.txt"
+      $tokenFile = Join-Path $base "alerts_token.txt"
       if (-not (Test-Path -LiteralPath $tokenFile)) {
         $res.StatusCode = 404
       } else {
