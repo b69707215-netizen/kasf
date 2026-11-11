@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карта загроз у реальному часі — Дніпропетровська, Харківська, Запорізька обл. (з Telegram)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #11151c;
+    --panel: #181d26;
+    --border: #2a3140;
+    --text: #d8dee9;
+    --muted: #8b93a5;
+    --red: #b02a2a;
+    --red-bright: #d43a3a;
+    --green: #2e7d4f;
+    --gray: #4a5568;
+    --yellow: #c9a227;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  #app { display: flex; height: 100vh; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    width: 340px; min-width: 280px; background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sidebar header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+  #sidebar h1 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  #sidebar h1 .flag { font-size: 20px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .official {
+    margin-top: 10px; font-size: 12px; line-height: 1.7;
+    border-top: 1px dashed var(--border); padding-top: 8px; color: var(--text);
+  }
+
+  .badges { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #20262f; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600;
+  }
+  .badge.alert { color: #ff6b6b; border-color: #5a2530; }
+  .badge.clear { color: #63d68f; border-color: #245038; }
+  .badge.nodata { color: var(--muted); }
+
+  .controls { display: flex; gap: 8px; margin-top: 10px; }
+  .controls button {
+    flex: 1; background: #232a35; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 8px; font-size: 13px; cursor: pointer;
+  }
+  .controls button:hover { background: #2b3442; }
+  .controls button.on { border-color: #3d6e8f; color: #7cc7ff; }
+
+  #channels { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .ch {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+    background: #1c222c; transition: border-color .2s;
+  }
+  .ch:hover { border-color: #3d4658; }
+  .ch .row1 { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.alert { background: var(--red-bright); box-shadow: 0 0 8px var(--red-bright); animation: pulse 1.2s infinite; }
+  .dot.clear { background: var(--green); }
+  .dot.nodata { background: var(--gray); }
+  .dot.loading { background: var(--yellow); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  .ch .name { font-weight: 600; font-size: 14px; flex: 1; }
+  .ch .time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .ch .last { color: var(--muted); font-size: 12px; margin-top: 6px; max-height: 32px; overflow: hidden; }
+  .ch.alert-zone { border-color: #6b2530; background: #2a1a1e; }
+  .ch a { color: #6ab0f3; text-decoration: none; font-size: 11px; }
+  .ch a:hover { text-decoration: underline; }
+
+  #footer { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+  #footer a { color: #6ab0f3; }
+
+  /* ---------- Map ---------- */
+  #mapwrap { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; background: var(--bg); }
+  /* темний стиль для шару "Схема" (супутник не фільтруємо) */
+  .osm-dark .leaflet-tile {
+    filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(1.12) saturate(.7);
+  }
+  #coords {
+    position: absolute; bottom: 34px; right: 10px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 10px; font-size: 12px;
+    font-family: Consolas, monospace; color: #7cc7ff;
+  }
+  #timestamp {
+    position: absolute; top: 10px; left: 10px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px;
+  }
+  #timestamp b { color: #7cc7ff; }
+  .target-marker {
+    background: none; border: none;
+    font-size: 24px; text-shadow: 0 0 8px #ff4040, 0 0 4px #000;
+    animation: pulse 1.2s infinite;
+  }
+  .track-label {
+    background: none; border: none;
+    color: #ffd9a0; font-size: 11px; font-weight: 600;
+    text-shadow: 0 0 4px #000, 0 0 4px #000; white-space: nowrap;
+    text-align: center;
+  }
+  .time-label {
+    background: rgba(0,0,0,.55); border: 1px solid #ffd280;
+    color: #ffd280; font-size: 10px; font-weight: 600;
+    border-radius: 4px; text-align: center; line-height: 13px;
+    white-space: nowrap;
+  }
+  .legend {
+    position: absolute; bottom: 14px; left: 14px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.9;
+  }
+  .lg { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
+  .lg-red { background: #a91f1f; border: 1px solid #ff5a5a; }
+  .lg-yellow { background: #c9a227; border: 1px solid #e8c94f; }
+  .lg-clear { background: #1b2230; border: 1px solid #46506a; }
+  .threat-line { margin-top: 6px; min-height: 0; }
+  .threat-chip {
+    display: inline-block; background: #5a2530; color: #ffb0b0;
+    border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;
+  }
+  .err-banner {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: #5a2530; color: #ffd7d7; border-radius: 8px;
+    padding: 6px 14px; font-size: 12px; display: none;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <header>
+      <h1><span class="flag">🇺🇦</span> Карта загроз — Дніпро/Харків/Запоріжжя</h1>
+      <div class="sub">Telegram-канали + офіційні тривоги · оновлення кожні 30 сек</div>
+      <div class="badges">
+        <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
+        <span class="badge clear" id="bClear">🟢 Спокій: 0</span>
+        <span class="badge nodata" id="bNoData">⚪ Немає даних: 0</span>
+      </div>
+      <div class="badges" id="threatCounts"></div>
+      <div class="controls">
+        <button id="btnSound">🔇 Звук: вимк</button>
+        <button id="btnRefresh">⟳ Оновити</button>
+      </div>
+      <div id="official" class="official">⏳ Офіційні тривоги: завантаження…</div>
+    </header>
+    <div id="channels"></div>
+    <div id="footer">
+      Джерела — публічні пости каналів через <a href="https://t.me" target="_blank">t.me/s/</a>.
+      Приватні канали (за запрошенням) прочитати не можна.
+    </div>
+  </aside>
+  <main id="mapwrap">
+    <div id="map"></div>
+    <div id="timestamp">Станом на <b>--:--:--</b></div>
+    <div id="officialMini" style="position:absolute;top:44px;left:10px;z-index:1000;background:rgba(24,29,38,.92);border:1px solid var(--border);border-radius:8px;padding:5px 12px;font-size:11px;"></div>
+    <div id="coords">📍 48.0000, 36.0000</div>
+    <div class="legend">
+      <div><span class="lg lg-red"></span> Тривога</div>
+      <div><span class="lg lg-yellow"></span> Загроза: шахеди / КАБи / ракети</div>
+      <div><span class="lg lg-clear"></span> Тривоги немає</div>
+      <div><span class="lg" style="background:#ff7b00;opacity:.35"></span> Конус КАБів (кільця: хвилини до падіння)</div>
+    </div>
+    <div class="err-banner" id="errBanner"></div>
+  </main>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+/* =========================================================
+   НАЛАШТУВАННЯ — можна редагувати прямо в цьому файлі
+   center: [широта, довгота] — точка каналу на карті
+   oblast: "dnipro" | "kharkiv" | "zaporizhzhia"
+   ========================================================= */
+const CHANNELS = [
+  {
+    id: "vasilkivka_forever",
+    name: "Васильківка назавжди 🦾",
+    zone: "Васильківська громада",
+    center: [48.194, 36.424],
+    url: "https://t.me/vasilkivka_forever"
+  },
+  {
+    id: "shovnebi",
+    name: "Шо там в небі",
+    zone: "Софіївська громада",
+    center: [48.292, 36.158],
+    url: "https://t.me/shovnebi"
+  },
+  {
+    id: "sinvo_ochi",
+    name: "Очі Синельникове 👀",
+    zone: "Синельниківська громада",
+    center: [48.372, 35.512],
+    url: "https://t.me/sinvo_ochi"
+  },
+  {
+    id: "sinelnikovo_nag",
+    name: "Наглядач Синельниківщини",
+    zone: "Синельниківський р-н (схід)",
+    center: [48.335, 35.845],
+    url: "https://t.me/sinelnikovo_nag"
+  },
+  {
+    id: "Pokrovskeonlychatt",
+    name: "ЧАТ ПІВДЕННОГО СХОДУ 🇺🇦",
+    zone: "Покровська громада (чат)",
+    center: [48.575, 36.500],
+    url: "https://t.me/Pokrovskeonlychatt"
+  },
+  {
+    id: "NaVartiNebaUk",
+    name: "На варті неба",
+    zone: "Небо півночі Дніпропетровщини",
+    center: [48.750, 35.550],
+    url: "https://t.me/NaVartiNebaUk"
+  },
+  {
+    id: "okoPkmain",
+    name: "Око Пк 👁",
+    zone: "Покровська громада (спостерігач)",
+    center: [48.500, 36.615],
+    url: "https://t.me/okoPkmain"
+  },
+  {
+    id: "Skhidnyk",
+    name: "Східняк",
+    zone: "Схід Дніпропетровщини",
+    center: [48.500, 36.050],
+    url: "https://t.me/Skhidnyk"
+  }
+];
+/* до якого регіону відноситься кожен канал: dnipro | kharkiv | zaporizhzhia */
+CHANNELS.forEach(c => { if (!c.oblast) c.oblast = "dnipro"; });
+
+/* Ключові слова. Останній вирішальний пост каналу визначає стан. */
+const RE_CLEAR = /(відбій|відбою|все чисто|все спокійно|всё чисто|всё спокойно|загрози немає|загрози нет|немає тривоги|нет тревоги|загроза минула|чисто над головою)/i;
+/* УВАГА: \b у JS не працює з кирилицею, тому межі слів — через (?<!\p{L}) / (?!\p{L}) */
+const RE_ALERT_CI = /(тривог|тревог|увага|внимание|укритт|укрыти|ракет|(?<!\p{L})(?:каб|каби|кабів|кабы)(?!\p{L})|шахед|герань|дрон|бпла|баліст|камікадзе|пускових рубежів|загроза авіації|(?<!\d)\d{3,4}\s*м(?!\p{L})|в бік|у бік|курсом на|курс на|йде у бік)/iu;
+const RE_TA = /(?<!\p{L})ТА(?!\p{L})/u;   // "ТА" (тактична авіація) — лише великими, щоб не плутати зі сполучником "та"
+const RE_ALERT = { test: t => RE_ALERT_CI.test(t) || RE_TA.test(t) };
+
+/* Тип загрози — визначається з останнього вирішального поста */
+const THREATS = [
+  { id: "kab",     icon: "💥", label: "КАБи",       re: /(?<!\p{L})(?:каб|каби|кабів|кабы)(?!\p{L})/iu },
+  { id: "drone",   icon: "🛸", label: "Дрони/шахеди", re: /(шахед|герань|дрон|бпла|камікадзе|молла)/i },
+  { id: "missile", icon: "🚀", label: "Ракети",      re: /(ракет|баліст|кінджал|крилат)/i },
+  { id: "aviation",icon: "✈️", label: "Авіація (ТА)", re: /(?<!\p{L})ТА(?!\p{L})|[Пп]ускових рубежів|(?<!\p{L})(?:MiG|Су-)|[Зз]агроза авіації/u },
+  { id: "artillery",icon:"⚔️", label: "Артилерія/обстріл", re: /(обстріл|обстрел|артилер|міномет|грами|градів)/i }
+];
+
+/* Напрямок, напр. "в напрямку ПК - Софіївка ЗП", "курсом на Солоне" */
+function extractDirection(txt) {
+  const m = txt.match(/(?:в напрямку|напрямок|направление|курсом на|курс на|в бік|у бік|довернув на|повернувся на|довернул на|повернулся на)\s+([^.;!?]{2,45})/i);
+  return m ? m[1].trim() : null;
+}
+
+function detectThreat(txt) {
+  for (const th of THREATS) if (th.re.test(txt)) return th;
+  return { id: "alert", icon: "🔴", label: "Тривога" };
+}
+
+/* =========================================================
+   ГЕОКОДИНГ — відомі місця з постів → координати.
+   Пошук по варіантах написання (uk + ru, без закінчень).
+   Додаєш назву сюди — і вона з'являється як ціль на карті.
+   ========================================================= */
+const PLACES = [
+  // Дніпропетровська область
+  { name: "Софіївка",            ll: [48.286, 36.175], v: ["софіївк", "софиевк"] },
+  { name: "Васильківка",         ll: [48.194, 36.424], v: ["васильківк", "васильковк", "васильки"] },
+  { name: "Синельникове",        ll: [48.372, 35.512], v: ["синельников", "синельників"] },
+  { name: "Покровське (Дн.)",    ll: [48.532, 36.549], v: ["покровськ", "покровск"] },
+  { name: "Межова",              ll: [48.430, 36.378], v: ["межов", "межева"] },
+  { name: "Павлоград",           ll: [48.533, 35.869], v: ["павлоград"] },
+  { name: "Дніпро",              ll: [48.465, 35.046], v: ["дніпро", "днепр", "днипро"] },
+  { name: "Кам'янське",          ll: [48.515, 34.613], v: ["кам'янськ", "каменск", "камʼянськ"] },
+  { name: "Новомосковськ",       ll: [48.638, 35.246], v: ["новомосковск", "новомосковськ"] },
+  { name: "Петриківка",          ll: [48.845, 35.912], v: ["петриків", "петриков"] },
+  { name: "Царичанка",           ll: [48.925, 35.325], v: ["царичанк"] },
+  { name: "Магдалинівка",        ll: [48.955, 35.848], v: ["магдалинівк"] },
+  { name: "Кривий Ріг",          ll: [47.910, 33.394], v: ["кривий ріг", "кривой рог", "кривбас"] },
+  { name: "Нікополь",            ll: [47.574, 34.400], v: ["нікопіл", "никопол"] },
+  { name: "Марганець",           ll: [47.647, 34.632], v: ["марганец", "марганець"] },
+  { name: "Вільногірськ",        ll: [48.190, 36.660], v: ["вільногірськ"] },
+  { name: "Юріївка",             ll: [48.350, 36.700], v: ["юріївк"] },
+  { name: "Богданівка (Пк)",     ll: [48.420, 36.560], v: ["богданівк"] },
+  { name: "Солоне (Дн.)",        ll: [48.606, 35.347], v: ["солоне", "солоного"] },
+  { name: "Слов'янка",           ll: [48.240, 35.980], v: ["слов'янк", "словянк"] },
+  { name: "Вербівське",          ll: [48.260, 36.330], v: ["вербівськ", "вербивськ"] },
+  { name: "Таромське",           ll: [48.577, 35.199], v: ["таромськ", "таромск"] },
+  { name: "Славгород",           ll: [48.314, 36.506], v: ["славгород"] },
+  { name: "Пашена Балка (Харків)", ll: [50.245, 36.436], v: ["пашена балк"] },
+  // Харківська область
+  { name: "Харків",              ll: [49.994, 36.231], v: ["харків", "харьков"] },
+  { name: "Куп'янськ",           ll: [49.709, 37.618], v: ["куп'янськ", "купянск", "купʼянськ"] },
+  { name: "Ізюм",                ll: [49.208, 37.250], v: ["ізюм", "изюм"] },
+  { name: "Лозова",              ll: [49.893, 36.316], v: ["лозов", "лозов "] },
+  { name: "Чугуїв",              ll: [49.837, 36.689], v: ["чугуїв", "чугуев"] },
+  { name: "Вовчанськ",           ll: [50.293, 36.929], v: ["вовчанськ", "вовчанск"] },
+  { name: "Богодухів",           ll: [50.164, 35.522], v: ["богодухів", "богодухов"] },
+  { name: "Красноград",          ll: [49.378, 35.466], v: ["красноград", "берестин"] },
+  { name: "Первомайський",       ll: [49.400, 35.920], v: ["первомайск"] },
+  { name: "Балаклія",            ll: [49.462, 36.858], v: ["балаклія", "балаклея"] },
+  { name: "Дергачі",             ll: [50.122, 35.975], v: ["дергач"] },
+  { name: "Люботин",             ll: [49.914, 35.916], v: ["люботин"] },
+  { name: "Золочів",             ll: [50.316, 35.708], v: ["золочів"] },
+  // Запорізька область
+  { name: "Запоріжжя",           ll: [47.838, 35.140], v: ["запоріжжя", "запорожье", "запоріж"] },
+  { name: "Енергодар",           ll: [47.499, 34.660], v: ["енергодар"] },
+  { name: "Мелітополь",          ll: [46.848, 35.374], v: ["мелітопол", "мелитопол"] },
+  { name: "Дніпрорудне",         ll: [47.610, 34.930], v: ["дніпрорудне"] },
+  { name: "Пологи",              ll: [47.560, 36.290], v: ["пологи"] },
+  { name: "Оріхів",              ll: [47.566, 35.797], v: ["оріхів", "орихов"] },
+  { name: "Василівка (Зап.)",    ll: [47.436, 35.246], v: ["василівк"] },
+  { name: "Токмак",              ll: [47.250, 35.700], v: ["токмак"] },
+  { name: "Гуляйполе",           ll: [47.655, 36.275], v: ["гуляйполе"] },
+  { name: "Бердянськ",           ll: [46.755, 36.798], v: ["бердянск", "бердянськ"] },
+  { name: "Кам'янка-Дніпровська",ll: [47.480, 34.385], v: ["кам'янка-дніпров", "каменка-днепров"] }
+];
+
+/* Розбір поста: ГДЕ дрон зараз і КУДИ летить (можлива ціль) */
+function extractTracks(txt) {
+  const low = " " + txt.toLowerCase().replace(/ʼ/g, "'") + " ";
+  const out = [];
+  for (const p of PLACES) {
+    for (const v of p.v) {
+      const idx = low.indexOf(v);
+      if (idx === -1) continue;
+      // що написано перед назвою місця: курс/напрямок → ціль, "над/в районі" → позиція зараз
+      const before = low.slice(Math.max(0, idx - 45), idx);
+      const isTarget = /(курсом на|курс на|курсе на|в бік|у бік|довернув на|повернувся на|довернул на|повернулся на|в напрямку|напрямок|(?:^|\s)до\s*$)/i.test(before);
+      const isPos = /(над|в районі|у районі|в район|районе|пролітає|пролетает|пролетел|працює|зараз)/i.test(before);
+      out.push({ name: p.name, ll: p.ll, role: isTarget ? "target" : "pos" });
+      break;
+    }
+    if (out.length >= 5) break;   // максимум 5 точок з одного поста
+  }
+  return out;
+}
+
+/* Проксі, через які браузер читає зовнішні сайти (t.me сам не віддає CORS).
+   1) локальний /proxy (якщо запущено через run.cmd — найнадійніше)
+   2-4) публічні проксі (якщо відкрито файл напряму) */
+const PROXIES = [
+  u => "/proxy?url=" + encodeURIComponent(u),
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+  u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
+  u => "https://api.cors.lol/?url=" + encodeURIComponent(u)
+];
+const REFRESH_MS = 20000;      // канали — кожні 20 сек (майже в реальному часі)
+const STAGGER_MS = 3000;       // канали опитуються по черзі, щоб не перевантажити проксі
+const FRESH_MS = 10 * 60000;   // немає нових постів > 10 хв → ціль зникає і тривога знімається
+
+/* ==================== Стан ==================== */
+const state = {};   // id -> { status: 'loading'|'ok'|'nodata'|'error', state: 'alert'|'clear'|'nodata', msgs: [{t, txt}], lastTime }
+CHANNELS.forEach(c => state[c.id] = { status: "loading", state: "nodata", msgs: [], lastTime: null });
+
+/* ==================== Карта ==================== */
+const map = L.map("map", {
+  zoomControl: true,
+  maxBounds: [[45.9, 32.9], [51.2, 38.6]],   // тільки 3 наші регіони, не вся Україна
+  maxBoundsViscosity: 0.8
+}).setView([48.65, 36.0], 7);
+// справжні карти: СУПУТНИК за замовчуванням + темна схема (Esri/OSM, без ключів)
+const satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+  attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 18
+}).addTo(map);
+const osmLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  attribution: "&copy; OpenStreetMap", maxZoom: 19, className: "osm-dark"
+});
+// підписи міст, сіл і вулиць поверх супутника (над заливкою областей)
+map.createPane("labels");
+map.getPane("labels").style.zIndex = 450;
+map.getPane("labels").style.pointerEvents = "none";
+// підписи УКРАЇНСЬКОЮ (hl=uk): міста, села, вулиці, дороги — прозорий шар поверх супутника
+const labelsUk = L.tileLayer("https://mt{s}.google.com/vt/lyrs=h&hl=uk&gl=UA&x={x}&y={y}&z={z}", {
+  pane: "labels", subdomains: "0123", maxZoom: 20, attribution: "Підписи: Google"
+}).addTo(map);
+L.control.layers(
+  { "🛰 Супутник (реальна)": satLayer, "🗺 Схема (темна)": osmLayer },
+  { "🏙 Назви українською": labelsUk },
+  { position: "topright" }
+).addTo(map);
+map.on("mousemove", e => {
+  const el = document.getElementById("coords");
+  if (el) el.textContent = "📍 " + e.latlng.lat.toFixed(4) + ", " + e.latlng.lng.toFixed(4);
+});
+
+/* підсвічений шар "Схема" */
+document.getElementById("map").style.background = "#11151c";
+
+/* =========================================================
+   КОНТУРИ ОБЛАСТЕЙ — закрашуються червоним при тривозі
+   ========================================================= */
+const OBLASTS = [
+  { key: "dnipro",      name: "Дніпропетровська область", geo: "UA_12_Dnipropetrovska.geojson" },
+  { key: "kharkiv",     name: "Харківська область",       geo: "UA_63_Kharkivska.geojson" },
+  { key: "zaporizhzhia",name: "Запорізька область",       geo: "UA_23_Zaporizka.geojson" }
+];
+const oblastState = {};   // key -> "alert" | "clear" | "nodata"
+const officialAlert = {}; // key -> true/false (з офіційних джерел)
+const stickyAlert = {};   // key -> true: тривога тримається на карті ДО офіційного відбою
+let officialSource = "";
+const oblastLayers = {};
+
+function oblastStyle(key) {
+  const s = oblastState[key];
+  if (s === "alert") return {
+    fillColor: "#a91f1f", fillOpacity: 0.6, color: "#ff5a5a", weight: 2
+  };
+  if (s === "threat") return {
+    fillColor: "#c9a227", fillOpacity: 0.5, color: "#e8c94f", weight: 2
+  };
+  if (s === "clear") return {
+    fillColor: "#1b2230", fillOpacity: 0.22, color: "#46506a", weight: 1.5
+  };
+  return { fillColor: "#232a35", fillOpacity: 0.2, color: "#3a4354", weight: 1.5 };
+}
+
+function updateOblastStyles() {
+  OBLASTS.forEach(o => {
+    const layer = oblastLayers[o.key];
+    if (!layer) return;
+    layer.setStyle(oblastStyle(o.key));
+    const s = oblastState[o.key];
+    const status = s === "alert" ? "🔴 <b>ТРИВОГА</b>" :
+      s === "threat" ? "🟡 <b>ЗАГРОЗА</b> (шахеди/КАБи/ракети)" :
+      s === "clear" ? "🟢 тривоги немає" : "⚪ немає даних";
+    // коли тривога тримається «липко» (канали замовкли, а відбою ще не було)
+    const held = s === "alert" && officialAlert[o.key] !== true
+      ? ` <span style="font-size:11px;color:#ffb0b0">(триває до офіційного відбою)</span>` : "";
+    const sir = officialAlert[o.key] === undefined ? "⚪ сирена невідома" :
+      officialAlert[o.key] ? "🔔 <b>СИРЕНА УВІМКНЕНА</b>" : "🔔 сирена вимкнена";
+    layer.setPopupContent(
+      `<b>${o.name}</b><br>${status}${held}` +
+      `<br>${sir}` +
+      `<br><span style="font-size:11px;color:#8b93a5">джерело: ${officialSource || "канали"}</span>`
+    );
+  });
+}
+
+function recomputeOblastStates() {
+  OBLASTS.forEach(o => {
+    const official = officialAlert[o.key];
+    let red = official === true;
+    let yellow = false;
+    let hasData = official !== undefined;
+    let chClassic = false;
+    CHANNELS.forEach(ch => {
+      if (ch.oblast !== o.key) return;
+      const st = state[ch.id];
+      if (st.status !== "ok") return;
+      hasData = true;
+      if (st.state !== "alert") return;
+      // класична тривога (ТА/авіація/обстріл) → червона; суті загрози (шахеди/КАБи/ракети) → жовта
+      const id = st.threat ? st.threat.id : "alert";
+      if (id === "drone" || id === "kab" || id === "missile") yellow = true;
+      else { red = true; chClassic = true; }
+    });
+    /* ЛИПКА ОФІЦІЙНА ТРИВОГА:
+       поки офіційний API НЕ скаже "відбій" — тривога лишається на карті,
+       навіть якщо канали замовкли (правило 1 хвилини тут не діє). */
+    if (red) stickyAlert[o.key] = true;
+    else if (official === false && !chClassic) stickyAlert[o.key] = false;
+    if (stickyAlert[o.key]) red = true;
+    oblastState[o.key] = red ? "alert" : yellow ? "threat" : (hasData ? "clear" : "nodata");
+  });
+  updateOblastStyles();
+}
+
+function loadOblasts() {
+  let loaded = 0;
+  const outerRings = [];   // зовнішні контури 3 областей — для затемнення решти
+  let unionBounds = null;  // спільні межі 3 областей
+  OBLASTS.forEach(o => {
+    fetch("https://raw.githubusercontent.com/EugeneBorshch/ukraine_geojson/master/" + o.geo)
+      .then(r => r.json())
+      .then(gj => {
+        oblastLayers[o.key] = L.geoJSON(gj, { style: () => oblastStyle(o.key) }).addTo(map);
+        oblastLayers[o.key].bindPopup(`<b>${o.name}</b>`);
+        // збираємо зовнішні контури
+        const collect = geom => {
+          if (!geom) return;
+          if (geom.type === "Polygon") {
+            outerRings.push(geom.coordinates[0].map(c => [c[1], c[0]]));   // GeoJSON [lng,lat] → Leaflet [lat,lng]
+            geom.coordinates[0].forEach(c => {
+              const ll = [c[1], c[0]];
+              unionBounds = unionBounds ? unionBounds.extend(ll) : L.latLngBounds(ll, ll);
+            });
+          } else if (geom.type === "MultiPolygon") {
+            geom.coordinates.forEach(poly => {
+              outerRings.push(poly[0].map(c => [c[1], c[0]]));
+              poly[0].forEach(c => {
+                const ll = [c[1], c[0]];
+                unionBounds = unionBounds ? unionBounds.extend(ll) : L.latLngBounds(ll, ll);
+              });
+            });
+          }
+        };
+        (gj.features || []).forEach(f => collect(f.geometry));
+        loaded++;
+        if (loaded === OBLASTS.length && unionBounds) {
+          // 1) затемнюємо все, що поза нашими 3 областями
+          map.createPane("mask");
+          map.getPane("mask").style.zIndex = 350;
+          map.getPane("mask").style.pointerEvents = "none";
+          const world = [[-85, -180], [85, -180], [85, 180], [-85, 180]];
+          L.polygon([world, ...outerRings], {
+            pane: "mask", stroke: false,
+            fillColor: "#11151c", fillOpacity: 1, interactive: false
+          }).addTo(map);
+          // 2) карта видно/обмежена тільки нашими областями
+          map.fitBounds(unionBounds, { padding: [8, 8] });
+          map.setMaxBounds(unionBounds.pad(0.02));
+          map.options.maxBoundsViscosity = 1.0;
+        }
+        recomputeOblastStates();
+      })
+      .catch(() => { showErr("⚠ Не вдалося завантажити контур області: " + o.name); });
+  });
+}
+
+const targetGroups = {}; // id -> L.layerGroup (точки загроз: шахеди/КАБи/ракети)
+
+/* Трекінг на карті: 🛸 де зараз летить дрон → 🎯 можлива ціль + лінія курсу */
+/* Гео-розрахунки: азимут і точка на відстані */
+function bearingTo(a, b) {
+  const f1 = a[0] * Math.PI / 180, f2 = b[0] * Math.PI / 180;
+  const dl = (b[1] - a[1]) * Math.PI / 180;
+  const y = Math.sin(dl) * Math.cos(f2);
+  const x = Math.cos(f1) * Math.sin(f2) - Math.sin(f1) * Math.cos(f2) * Math.cos(dl);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+function destination(from, bearing, dist) {
+  const R = 6371000, d = dist / R;
+  const th = bearing * Math.PI / 180, f1 = from[0] * Math.PI / 180, l1 = from[1] * Math.PI / 180;
+  const f2 = Math.asin(Math.sin(f1) * Math.cos(d) + Math.cos(f1) * Math.sin(d) * Math.cos(th));
+  const l2 = l1 + Math.atan2(Math.sin(th) * Math.sin(d) * Math.cos(f1), Math.cos(d) - Math.sin(f1) * Math.sin(f2));
+  return [f2 * 180 / Math.PI, ((l2 * 180 / Math.PI + 540) % 360) - 180];
+}
+
+/* Конус загрози КАБ/ракети: від точки пуску до цілі, кільця 5хв..1хв (~10 км/хв) */
+function drawThreatCone(g, from, to) {
+  const D = Math.min(map.distance(from, to), 80000);
+  const half = 11;                       // половина кута конуса, °
+  const brg = bearingTo(from, to);
+  const steps = 14;
+  const apex = [[from[0], from[1]]];
+  for (let i = 0; i <= steps; i++) {
+    const a = brg - half + (2 * half * i) / steps;
+    apex.push(destination(from, a, D * 1.18));
+  }
+  L.polygon(apex, {
+    color: "#ff9b3d", weight: 1, fillColor: "#ff7b00", fillOpacity: 0.16,
+    dashArray: "4 6", interactive: false
+  }).addTo(g);
+  for (let m = 5; m >= 1; m--) {
+    const dist = m * 10000;              // ~10 км за хвилину
+    if (dist > D * 1.18) continue;
+    const ring = [];
+    for (let i = 0; i <= steps; i++) {
+      const a = brg - half + (2 * half * i) / steps;
+      ring.push(destination(from, a, dist));
+    }
+    L.polyline(ring, { color: "#ffd280", weight: 1, dashArray: "3 5", opacity: 0.85, interactive: false }).addTo(g);
+    const mid = destination(from, brg, dist);
+    L.marker(mid, {
+      icon: L.divIcon({ className: "time-label", html: m + " хв", iconSize: [40, 14] }),
+      interactive: false, zIndexOffset: 600
+    }).addTo(g);
+  }
+}
+
+function updateTargets(ch) {
+  const st = state[ch.id];
+  if (!targetGroups[ch.id]) {
+    targetGroups[ch.id] = L.layerGroup().addTo(map);
+  }
+  const g = targetGroups[ch.id];
+  g.clearLayers();
+  if (st.state !== "alert" || !st.targets) return;
+
+  const poses = st.targets.filter(t => t.role === "pos");
+  const targets = st.targets.filter(t => t.role === "target");
+  const linkedTargets = new Set();
+
+  // 🛸 позиції дронів/загроз "зараз"
+  poses.forEach(pos => {
+    const th = detectThreat(pos.msg.txt);
+    const icon = th.id === "kab" ? "💥" : th.id === "missile" ? "🚀" : "🛸";
+    // можлива ціль: з того ж поста, або остання відома
+    let tgt = st.targets.find(t => t.role === "target" && t.msg.t === pos.msg.t);
+    if (!tgt && targets.length) tgt = targets[targets.length - 1];
+    if (tgt) linkedTargets.add(tgt.name + "|" + tgt.msg.t);    // підпис місця біля точки
+    L.marker(pos.ll, {
+      icon: L.divIcon({ className: "track-label", html: pos.name, iconSize: [140, 14] }),
+      interactive: false, zIndexOffset: 500
+    }).addTo(g);
+    L.marker(pos.ll, {
+      icon: L.divIcon({ className: "target-marker", html: icon, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      zIndexOffset: 1000
+    })
+      .bindPopup(
+        `<b>${icon} Зараз: ${pos.name}</b>` +
+        (tgt ? `<br>🎯 можлива ціль: <b>${tgt.name}</b>` : "") +
+        `<br>📍 ${pos.ll[0].toFixed(4)}, ${pos.ll[1].toFixed(4)}` +
+        `<br><span style="color:#6ab0f3">${fmtTime(pos.msg.t)}</span> — ${escapeHtml(pos.msg.txt).slice(0, 180)}` +
+        `<hr>джерело: ${ch.name}`,
+        { maxWidth: 320 }
+      )
+      .addTo(g);
+    if (tgt) {
+      const dist = map.distance(pos.ll, tgt.ll);
+      if (dist > 5000) {
+        if (th.id === "kab" || th.id === "missile") {
+          drawThreatCone(g, pos.ll, tgt.ll);       // конус з кільцями 5хв..1хв
+        } else {
+          L.polyline([pos.ll, tgt.ll], {
+            color: "#ff9b3d", weight: 2.5, dashArray: "2 7", opacity: 0.9
+          }).addTo(g);
+        }
+      }
+    }
+  });
+
+  // 🎯 можливі цілі
+  targets.forEach(t => {
+    const th = detectThreat(t.msg.txt);
+    const icon = th.id === "kab" ? "💥" : th.id === "missile" ? "🚀" : "🎯";
+    L.marker(t.ll, {
+      icon: L.divIcon({ className: "target-marker", html: icon, iconSize: [26, 26], iconAnchor: [13, 13] }),
+      zIndexOffset: 900
+    })
+      .bindPopup(
+        `<b>${icon} Можлива ціль: ${t.name}</b><br>` +
+        `📍 ${t.ll[0].toFixed(4)}, ${t.ll[1].toFixed(4)}` +
+        `<br><span style="color:#6ab0f3">${fmtTime(t.msg.t)}</span> — ${escapeHtml(t.msg.txt).slice(0, 180)}` +
+        `<hr>джерело: ${ch.name}`,
+        { maxWidth: 320 }
+      )
+      .addTo(g);
+    // підпис місця біля цілі
+    L.marker(t.ll, {
+      icon: L.divIcon({ className: "track-label", html: t.name, iconSize: [140, 14] }),
+      interactive: false, zIndexOffset: 500
+    }).addTo(g);
+    const linked = linkedTargets.has(t.name + "|" + t.msg.t);
+    if (th.id === "kab" || th.id === "missile") {
+      if (!linked) drawThreatCone(g, ch.center, t.ll);   // конус від громади до цілі
+    } else if (!linked) {
+      L.polyline([ch.center, t.ll], {
+        color: "#d43a3a", weight: 2, dashArray: "6 8", opacity: 0.7
+      }).addTo(g);
+    }
+  });
+}
+
+function popupHtml(ch) {
+  const st = state[ch.id];
+  let h = `<b>${ch.name}</b><br><span style="color:#8b93a5">${ch.zone}</span>`;
+  if (st.state === "alert" && st.threat) {
+    h += `<hr><div style="color:#ff6b6b;font-weight:600">${st.threat.icon} Загроза: ${st.threat.label}` +
+         (st.direction ? ` → ${escapeHtml(st.direction)}` : "") + `</div>`;
+  }
+  h += `<hr>`;
+  st.msgs.slice(0, 5).forEach(m => {
+    h += `<div style="margin:4px 0"><span style="color:#6ab0f3">${fmtTime(m.t)}</span> — ${escapeHtml(m.txt).slice(0, 160)}</div>`;
+  });
+  if (!st.msgs.length) h += `<div style="color:#8b93a5">Немає доступних постів</div>`;
+  h += `<hr><a href="${ch.url}" target="_blank">Відкрити канал ↗</a>`;
+  return h;
+}
+
+/* ==================== Мережа ==================== */
+/* url — що читаємо; validate — перевірка, що вміст той, що треба */
+async function fetchViaProxy(url, validate) {
+  for (const p of PROXIES) {
+    try {
+      const r = await fetch(p(url), { signal: AbortSignal.timeout(25000) });
+      if (!r.ok) continue;
+      const t = await r.text();
+      if (!validate || validate(t)) return t;
+    } catch (e) { /* наступний проксі */ }
+  }
+  return null;
+}
+
+function parseMessages(html) {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const nodes = doc.querySelectorAll(".tgme_widget_message");
+  const out = [];
+  nodes.forEach(n => {
+    const timeEl = n.querySelector("time[datetime]");
+    if (!timeEl) return;
+    const t = new Date(timeEl.getAttribute("datetime"));
+    const textEl = n.querySelector(".tgme_widget_message_text");
+    const txt = textEl ? textEl.textContent.trim().replace(/\s+/g, " ") : "";
+    if (t && !isNaN(t)) out.push({ t: t.getTime(), txt });
+  });
+  out.sort((a, b) => a.t - b.t);
+  return out;
+}
+
+function classify(msgs) {
+  const now = Date.now();
+  // СВІЖІСТЬ: беремо до уваги лише пости за останні FRESH_MS (10 хв).
+  // Якщо нових постів немає довше — ціль зникає, тривога знімається.
+  const fresh = msgs.filter(m => m.t >= now - FRESH_MS);
+  if (!fresh.length) {
+    return { state: "clear", msg: null, threat: null, direction: null, tracks: [], stale: true };
+  }
+  // від старих до нових; останній вирішальний пост виграє
+  let verdict = { state: "nodata", msg: null, threat: null, direction: null, tracks: [] };
+  const trackMap = {};   // "назва|роль" -> останній трек (уникаємо дублів)
+  for (const m of fresh) {
+    if (!m.txt) continue;
+    if (RE_CLEAR.test(m.txt)) {
+      verdict = { state: "clear", msg: m, threat: null, direction: null, tracks: [] };
+      for (const k in trackMap) delete trackMap[k];   // відбій скидає старі треки
+      continue;
+    }
+    if (RE_ALERT.test(m.txt)) {
+      const th = detectThreat(m.txt);
+      verdict = { state: "alert", msg: m, threat: th, direction: extractDirection(m.txt), tracks: verdict.tracks };
+      extractTracks(m.txt).forEach(t => { trackMap[t.name + "|" + t.role] = { ...t, msg: m }; });
+    }
+  }
+  verdict.tracks = Object.values(trackMap);
+  return verdict;
+}
+
+async function refreshChannel(ch) {
+  const st = state[ch.id];
+  if (st.busy) return;            // попереднє оновлення ще триває — пропускаємо
+  st.busy = true;
+  try {
+    const html = await fetchViaProxy("https://t.me/s/" + ch.id, t => t.includes("tgme_widget_message"));
+    if (html === null) {
+      st.status = "error";
+      render();
+      return;
+    }
+    const msgs = parseMessages(html);
+    if (!msgs.length) {
+      st.status = "nodata";      // канал є, але превʼю постів недоступне
+      render();
+      return;
+    }
+    const v = classify(msgs);
+    const prevState = st.state;
+    st.status = "ok";
+    st.state = v.state;
+    st.threat = v.threat;
+    st.direction = v.direction;
+    st.targets = v.tracks;   // треки: позиції дронів + можливі цілі
+    st.msgs = msgs.slice(-10);
+    st.lastTime = msgs[msgs.length - 1].t;
+    if (prevState !== "alert" && v.state === "alert") onNewAlert(ch, v.msg, v.threat);
+    updateTargets(ch);
+    recomputeOblastStates();
+    render();
+  } finally {
+    st.busy = false;
+  }
+}
+
+/* ==================== Звук ==================== */
+let soundOn = false, lastAlertAt = 0;
+function onNewAlert(ch, msg, threat) {
+  const now = Date.now();
+  if (now - lastAlertAt < 10000) return;   // не частіше ніж раз на 10с
+  lastAlertAt = now;
+  if (soundOn) beep();
+  showErr(`🔴 ТРИВОГА: ${ch.name}${threat ? " — " + threat.icon + " " + threat.label : ""}${msg ? " — " + msg.txt.slice(0, 50) : ""}`);
+}
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.35].forEach(off => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.001, ctx.currentTime + off);
+      g.gain.exponentialRampToValueAtTime(0.3, ctx.currentTime + off + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + off + 0.3);
+      o.start(ctx.currentTime + off); o.stop(ctx.currentTime + off + 0.35);
+    });
+  } catch (e) {}
+}
+/* справжня сирена (підйом-спад, як повітряна тривога) */
+function siren() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const t0 = ctx.currentTime;
+    for (let i = 0; i < 4; i++) {   // 4 цикли ≈ 4 секунди
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(520, t0 + i);
+      o.frequency.linearRampToValueAtTime(950, t0 + i + 0.5);
+      o.frequency.linearRampToValueAtTime(520, t0 + i + 1);
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.001, t0 + i);
+      g.gain.linearRampToValueAtTime(0.25, t0 + i + 0.05);
+      g.gain.setValueAtTime(0.25, t0 + i + 0.95);
+      g.gain.linearRampToValueAtTime(0.001, t0 + i + 1);
+      o.start(t0 + i); o.stop(t0 + i + 1.02);
+    }
+  } catch (e) {}
+}
+/* відбій тривоги — один мʼякий сигнал */
+function allClear() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = 660;
+    o.connect(g); g.connect(ctx.destination);
+    g.gain.setValueAtTime(0.001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+    o.start(); o.stop(ctx.currentTime + 0.85);
+  } catch (e) {}
+}
+
+/* ==================== UI ==================== */
+const $ = id => document.getElementById(id);
+function fmtTime(ms) {
+  if (!ms) return "--:--";
+  return new Date(ms).toLocaleTimeString("uk-UA", { hour: "2-digit", minute: "2-digit" });
+}
+function escapeHtml(s) {
+  return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+function showErr(text) {
+  const b = $("errBanner");
+  b.textContent = text; b.style.display = "block";
+  clearTimeout(showErr._t);
+  showErr._t = setTimeout(() => b.style.display = "none", 8000);
+}
+
+function render() {
+  updateTimestamp();
+  // бейджі
+  let a = 0, c = 0, n = 0;
+  CHANNELS.forEach(ch => {
+    const st = state[ch.id];
+    if (st.state === "alert") a++;
+    else if (st.state === "clear") c++;
+    else n++;
+  });
+  $("bAlert").textContent = `🔴 Тривога: ${a}`;
+  $("bClear").textContent = `🟢 Спокій: ${c}`;
+  $("bNoData").textContent = `⚪ Немає даних: ${n}`;
+
+  // лічильники загроз по типах — що саме летить зараз
+  const counts = {};
+  CHANNELS.forEach(ch => {
+    const st = state[ch.id];
+    if (st.state === "alert" && st.threat) counts[st.threat.id] = (counts[st.threat.id] || 0) + 1;
+  });
+  const order = ["drone", "kab", "missile", "aviation", "artillery", "alert"];
+  const tc = order.filter(id => counts[id]).map(id => {
+    const th = THREATS.find(t => t.id === id) || { icon: "🔴", label: "Тривога" };
+    return `<span class="badge alert">${th.icon} ${th.label}: ${counts[id]}</span>`;
+  }).join("");
+  $("threatCounts").innerHTML = tc || `<span class="badge nodata">Виявлених загроз зараз немає</span>`;
+
+  // список каналів
+  const box = $("channels");
+  if (!box.childElementCount || box._rendered !== CHANNELS.length) {
+    box.innerHTML = "";
+    CHANNELS.forEach(ch => {
+      const d = document.createElement("div");
+      d.className = "ch"; d.id = "ch-" + ch.id;
+      d.innerHTML = `
+        <div class="row1">
+          <span class="dot loading"></span>
+          <span class="name">${ch.name}</span>
+          <span class="time"></span>
+        </div>
+        <div class="threat-line"></div>
+        <div class="last"></div>
+        <a href="${ch.url}" target="_blank">${ch.id} ↗</a>`;
+      d.onclick = e => { if (!e.target.closest("a")) focusChannel(ch.id); };
+      box.appendChild(d);
+    });
+    box._rendered = CHANNELS.length;
+  }
+  CHANNELS.forEach(ch => {
+    const el = $("ch-" + ch.id); if (!el) return;
+    const st = state[ch.id];
+    const dot = el.querySelector(".dot");
+    dot.className = "dot " + (st.status === "ok" ? st.state : (st.status === "loading" ? "loading" : "nodata"));
+    el.classList.toggle("alert-zone", st.state === "alert");
+    el.querySelector(".time").textContent = st.lastTime ? fmtTime(st.lastTime) : "";
+    const tl = el.querySelector(".threat-line");
+    if (st.state === "alert" && st.threat) {
+      tl.innerHTML = `<span class="threat-chip">${st.threat.icon} ${st.threat.label}${st.direction ? " → " + escapeHtml(st.direction) : ""}</span>`;
+    } else if (st.status === "ok" && st.lastTime && Date.now() - st.lastTime > FRESH_MS) {
+      tl.innerHTML = `<span style="color:#8b93a5;font-size:11px">⏳ немає новин понад ${Math.round(FRESH_MS / 60000)} хв — тривога знята</span>`;
+    } else { tl.innerHTML = ""; }
+    const lastTxt = st.msgs.length ? st.msgs[st.msgs.length - 1].txt : "";
+    el.querySelector(".last").textContent = lastTxt ? lastTxt.slice(0, 90) : "—";
+  });
+}
+
+function focusChannel(id) {
+  const ch = CHANNELS.find(c => c.id === id);
+  if (!ch) return;
+  map.setView(ch.center, 10);
+  L.popup({ maxWidth: 320 }).setLatLng(ch.center).setContent(popupHtml(ch)).openOn(map);
+}
+
+/* ==================== Офіційний шар тривог (3 джерела з фолбеком) ==================== */
+/* 1) alerts.com.ua (безкоштовний API) → 2) ubilling.net.ua → 3) офіційні TG-канали */
+const OFFICIAL_TG = ["air_raid_alert_ua", "povitryana_tryvoha"];
+const lastOfficialAlert = {};   // key -> попередній офіційний стан (для реакції звуку)
+
+/* реакція на зміну офіційної тривоги: сирена УВІМК / відбій */
+function officialChangedReact() {
+  OBLASTS.forEach(o => {
+    const nowA = officialAlert[o.key];
+    if (nowA === undefined) return;
+    const prev = lastOfficialAlert[o.key];
+    if (prev === undefined) { lastOfficialAlert[o.key] = nowA; return; }  // перший запуск — без звуку
+    if (prev !== nowA) {
+      lastOfficialAlert[o.key] = nowA;
+      if (nowA) {
+        if (soundOn) siren();
+        showErr(`🔴 СИРЕНА УВІМКНЕНА — ${o.name}`);
+      } else {
+        if (soundOn) allClear();
+        showErr(`🟢 ВІДБІЙ — ${o.name}: сирена вимкнена`);
+      }
+    }
+  });
+}
+
+async function refreshOfficial() {
+  const box = $("official");
+  let rows = null;
+
+  // джерело 0: ОФІЦІЙНЕ API alerts.in.ua (потрібен токен у файлі alerts_token.txt)
+  try {
+    const r = await fetch("/alerts", { signal: AbortSignal.timeout(20000) });
+    if (r.ok) {
+      const j = await r.json();
+      const act = (j.alerts || []).filter(x => x.alert_type === "air_raid" && !x.finished_at);
+      rows = {};
+      OBLASTS.forEach(o => {
+        const a = act.filter(x => x.location_oblast === o.name);
+        rows[o.key] = { alert: a.length > 0, changed: a.length ? a[0].started_at : null };
+      });
+      officialSource = "alerts.in.ua (офіційне API)";
+    }
+  } catch (e) { rows = null; }
+
+  // джерело 1: alerts.com.ua
+  let raw = rows ? null : await fetchViaProxy("https://alerts.com.ua/api/states");
+  if (raw) {
+    try {
+      const j = JSON.parse(raw);
+      rows = {};
+      OBLASTS.forEach(o => {
+        const s = (j.states || []).find(x => x.name.startsWith(o.name.slice(0, 12)));
+        if (s) rows[o.key] = { alert: !!s.alert, changed: s.changed };
+      });
+      if (Object.keys(rows).length) officialSource = "alerts.com.ua"; else rows = null;
+    } catch (e) { rows = null; }
+  }
+
+  // джерело 2: ubilling.net.ua
+  if (!rows) {
+    raw = await fetchViaProxy("https://ubilling.net.ua/aerialalerts/");
+    if (raw) {
+      try {
+        const j = JSON.parse(raw);
+        rows = {};
+        OBLASTS.forEach(o => {
+          const k = Object.keys(j.states || {}).find(k => k.startsWith(o.name.slice(0, 12)));
+          if (k) rows[o.key] = { alert: !!j.states[k].alertnow, changed: j.states[k].changed };
+        });
+        if (Object.keys(rows).length) officialSource = "ubilling.net.ua"; else rows = null;
+      } catch (e) { rows = null; }
+    }
+  }
+
+  // джерело 3: офіційні TG-канали (останній пост по області за 3 години)
+  if (!rows) {
+    rows = {};
+    const cutoff = Date.now() - 3 * 3600 * 1000;
+    const last = {};
+    for (const c of OFFICIAL_TG) {
+      const html = await fetchViaProxy("https://t.me/s/" + c, t => t.includes("tgme_widget_message"));
+      if (!html) continue;
+      parseMessages(html).forEach(m => {
+        if (m.t < cutoff || !m.txt) return;
+        const low = m.txt.toLowerCase();
+        OBLASTS.forEach(o => {
+          const hit = ["дніпропетровськ","днепропетровск","харківськ","харьков","запорізьк","запорожск","запорож"]
+            .find(v => low.includes(v) && (o.key === "dnipro" ? v.startsWith("дн") : o.key === "kharkiv" ? v.startsWith("х") : v.startsWith("з")));
+          if (!hit) return;
+          const isClear = RE_CLEAR.test(m.txt);
+          const isAlert = /(тривог|тревог)/i.test(m.txt) && !isClear;
+          if (isAlert || isClear) last[o.key] = { alert: isAlert, t: m.t };
+        });
+      });
+    }
+    OBLASTS.forEach(o => { if (last[o.key]) rows[o.key] = { alert: last[o.key].alert, changed: new Date(last[o.key].t).toISOString() }; });
+    officialSource = Object.keys(rows).length ? "TG: " + OFFICIAL_TG.join(", ") : "";
+  }
+
+  if (rows && Object.keys(rows).length) {
+    OBLASTS.forEach(o => {
+      if (rows[o.key]) officialAlert[o.key] = rows[o.key].alert;
+    });
+    officialChangedReact();
+    const lines = OBLASTS.map(o => {
+      const off = officialAlert[o.key];
+      const short = o.name.replace(" область", "");
+      // джерело офлайн, але тривога ще не відбита → тримаємо на карті
+      if (off === undefined) {
+        return stickyAlert[o.key]
+          ? `🔴 <b>${short}</b> — ТРИВОГА <span style="color:#ffb0b0">(джерело офлайн, тримається до відбою)</span>`
+          : null;
+      }
+      const changed = rows[o.key] && rows[o.key].changed ? new Date(rows[o.key].changed) : null;
+      return off
+        ? `🔴 <b>${short}</b> — 🔔 СИРЕНА УВІМКНЕНА${changed ? " (з " + fmtTime(changed.getTime()) + ")" : ""}`
+        : `🟢 ${short} — 🔔 сирена вимкнена`;
+    }).filter(Boolean);
+    box.innerHTML = "<b>Офіційно:</b><br>" + lines.join("<br>") +
+      `<br><span style="color:#6ab0f3;font-size:10px">✅ підключено: ${officialSource} · оновлено ${new Date().toLocaleTimeString("uk-UA")}</span>`;
+    // компактна строка сирени прямо на карті
+    const mini = OBLASTS.map(o => {
+      const k = o.name.replace(" область", "");
+      const short = k.slice(0, 4) + ".";
+      return officialAlert[o.key] === undefined ? `${short}:⚪` : officialAlert[o.key] ? `<span style="color:#ff6b6b">${short}:🔔🔴</span>` : `${short}:🟢`;
+    }).join(" · ");
+    const om = $("officialMini");
+    if (om) om.innerHTML = "🔔 Сирена: " + mini + ` <span style="color:#8b93a5">(${officialSource}, ${new Date().toLocaleTimeString("uk-UA")})</span>`;
+  } else {
+    box.innerHTML = "⚠ ОФІЦІЙНІ ДАНІ НЕДОСТУПНІ — стан сирени невідомий (спроба за хвилину)";
+    officialSource = "";
+    const om = $("officialMini");
+    if (om) om.innerHTML = "⚠ Офіційно: сирена невідома (джерело недоступне)";
+  }
+  recomputeOblastStates();
+}
+
+/* ==================== Запуск ==================== */
+function updateTimestamp() {
+  $("timestamp").innerHTML = "Станом на <b>" +
+    new Date().toLocaleTimeString("uk-UA") + "</b>";
+}
+
+async function refreshAll() {
+  $("errBanner").style.display = "none";
+  CHANNELS.forEach(ch => { if (state[ch.id].status !== "ok") state[ch.id].status = "loading"; });
+  render();
+  await Promise.allSettled(CHANNELS.map(refreshChannel));
+  updateTimestamp();
+  const errs = CHANNELS.filter(ch => state[ch.id].status === "error").length;
+  if (errs) showErr(`⚠ ${errs} канал(ів) не вдалося прочитати — повторю спробу за хвилину`);
+}
+
+$("btnRefresh").onclick = refreshAll;
+$("btnSound").onclick = () => {
+  soundOn = !soundOn;
+  $("btnSound").textContent = soundOn ? "🔊 Звук: увімк" : "🔇 Звук: вимк";
+  $("btnSound").classList.toggle("on", soundOn);
+  if (soundOn) beep();
+};
+
+CHANNELS.forEach(ch => updateTargets(ch));
+render();
+loadOblasts();
+
+/* кожен канал оновлюється сам, зі зсувом у 4с — рівномірне навантаження */
+CHANNELS.forEach((ch, i) => {
+  setTimeout(() => {
+    refreshChannel(ch);
+    setInterval(() => refreshChannel(ch), REFRESH_MS);
+  }, 1500 + i * STAGGER_MS);
+});
+refreshOfficial();
+setInterval(refreshOfficial, 45000);
+</script>
+</body>
+</html>
