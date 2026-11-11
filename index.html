@@ -103,7 +103,8 @@
     font-size: 24px; text-shadow: 0 0 8px #ff4040, 0 0 4px #000;
     animation: pulse 1.2s infinite;
   }
-  .plane-marker { background: none; border: none; }
+  .plane-marker { background: none; border: none; transition: transform 4s linear; }
+  .leaflet-zoom-anim .plane-marker, .leaflet-dragging .plane-marker { transition: none; }
   .track-label {
     background: none; border: none;
     color: #ffd9a0; font-size: 11px; font-weight: 600;
@@ -579,8 +580,14 @@ function loadOblasts() {
   const outerRings = [];   // зовнішні контури 3 областей — для затемнення решти
   let unionBounds = null;  // спільні межі 3 областей
   OBLASTS.forEach(o => {
-    fetch("https://raw.githubusercontent.com/EugeneBorshch/ukraine_geojson/master/" + o.geo)
-      .then(r => r.json())
+    // контури областей (~800 КБ) тягнемо один раз, далі беремо з кешу браузера
+    const ckey = "geo1:" + o.geo;
+    let cached = null;
+    try { cached = JSON.parse(localStorage.getItem(ckey) || "null"); } catch (e) {}
+    (cached ? Promise.resolve(cached)
+      : fetch("https://raw.githubusercontent.com/EugeneBorshch/ukraine_geojson/master/" + o.geo)
+          .then(r => r.json())
+          .then(gj => { try { localStorage.setItem(ckey, JSON.stringify(gj)); } catch (e) {} return gj; }))
       .then(gj => {
         oblastLayers[o.key] = L.geoJSON(gj, { style: () => oblastStyle(o.key) }).addTo(map);
         oblastLayers[o.key].bindPopup(`<b>${o.name}</b>`);
@@ -603,11 +610,27 @@ function loadOblasts() {
             });
           }
         };
-        (gj.features || []).forEach(f => collect(f.geometry));
+        // файл може бути FeatureCollection, Feature або просто геометрією
+        const geoms = gj.type === "FeatureCollection" ? (gj.features || []).map(f => f.geometry)
+          : gj.type === "Feature" ? [gj.geometry]
+          : gj.type === "GeometryCollection" ? (gj.geometries || [])
+          : [gj];
+        geoms.forEach(collect);
         loaded++;
         if (loaded === OBLASTS.length && unionBounds) {
-          // вся Україна: вписуємо карту в межі всіх областей
+          // тільки Україна: закриваємо все, що поза її межами (сусідні країни, море, підписи)
+          map.createPane("mask");
+          map.getPane("mask").style.zIndex = 455;          // вище за підписи (450), нижче за маркери
+          map.getPane("mask").style.pointerEvents = "none";
+          const world = [[-85, -180], [85, -180], [85, 180], [-85, 180]];
+          L.polygon([world, ...outerRings], {
+            pane: "mask", stroke: false, fillColor: "#11151c", fillOpacity: 1, interactive: false
+          }).addTo(map);
+          // вписуємо карту в Україну й не даємо відлітати
           map.fitBounds(unionBounds, { padding: [8, 8] });
+          map.setMaxBounds(unionBounds.pad(0.05));
+          map.options.maxBoundsViscosity = 1.0;
+          map.setMinZoom(map.getBoundsZoom(unionBounds.pad(0.05)));
         }
         recomputeOblastStates();
       })
@@ -687,7 +710,7 @@ function updateTargets(ch) {
   }
   const g = targetGroups[ch.id];
   g.clearLayers();
-  if (st.state !== "alert" || !st.targets) return;
+  if (!SHOW_TG_TARGETS || st.state !== "alert" || !st.targets) return;
 
   const poses = st.targets.filter(t => t.role === "pos");
   const targets = st.targets.filter(t => t.role === "target");
@@ -966,7 +989,7 @@ function render() {
   $("bAlert").textContent = `🔴 Тривога: ${redNow} з ${OBLASTS.length} обл.`;
   $("bAlert").title = `Офіційні дані є по ${known} з ${OBLASTS.length} областей`;
   $("bClear").textContent = `🟡 Загроза (канали): ${yellowNow}`;
-  $("bNoData").textContent = `📡 Канали: ${online}/${CHANNELS.length} онлайн · ${fresh} зі свіжими постами · 🎯 ${seen.size + dimapCount}`;
+  $("bNoData").textContent =`📡 Канали: ${online}/${CHANNELS.length} онлайн · ${fresh} зі свіжими постами · 🎯 ${(SHOW_TG_TARGETS ? seen.size : 0) + dimapCount}`;
 
   // лічильники загроз по типах — що саме летить зараз
   const counts = {};
@@ -1170,6 +1193,8 @@ async function refreshOfficial() {
 const dimapGroup = L.layerGroup().addTo(map);
 layersCtl.addOverlay(dimapGroup, "🎯 Цілі (dimap.live)");
 let dimapCount = 0;
+const dimapMarkers = new Map();   // id цілі -> { marker, trail, kind, brg }
+const SHOW_TG_TARGETS = false;    // цілі беремо лише з dimap.live (для синхронності); true — додати й точки з Telegram
 const DIMAP_TYPES = {
   shahed: "Шахед", reactive_shahed: "Реактивний шахед", avia: "Авіація", fpv: "FPV/дрон"
 };
@@ -1185,28 +1210,46 @@ async function refreshDimapTargets() {
   if (!raw) return;
   let j; try { j = JSON.parse(raw); } catch (e) { return; }
   if (!Array.isArray(j.targets)) return;
-  dimapGroup.clearLayers();
   const maxAge = 3 * 60000;   // ціль без оновлень понад 3 хв не показуємо
-  let n = 0;
+  const alive = new Set();
   j.targets.forEach(t => {
     if (!Number.isFinite(t.lat) || !Number.isFinite(t.lng)) return;
     const seenAt = Date.parse(t.lastSeen);
     if (seenAt && Date.now() - seenAt > maxAge) return;
+    const id = String(t.id);
+    alive.add(id);
     const kind = dimapKind(t.type || "");
     const label = DIMAP_TYPES[t.type] || t.type || "Ціль";
-    if (Array.isArray(t.history) && t.history.length > 1) {
-      const pts = t.history.map(p => Array.isArray(p) ? [p[0], p[1]] : (p && Number.isFinite(p.lat) ? [p.lat, p.lng] : null)).filter(Boolean);
-      if (pts.length > 1) L.polyline(pts, { color: "#ff9b3d", weight: 1.5, opacity: 0.6, dashArray: "3 5", interactive: false }).addTo(dimapGroup);
+    const html = `<b>${escapeHtml(label)}</b><br>курс ${Math.round(t.bearing || 0)}° · ${Math.round(t.speed || 0)} км/год` +
+      `<br>📍 ${t.lat.toFixed(3)}, ${t.lng.toFixed(3)}` +
+      (seenAt ? `<br><span style="color:#6ab0f3">${fmtTime(seenAt)}</span>` : "") +
+      `<hr><span style="color:#8b93a5">джерело: dimap.live</span>`;
+    let e = dimapMarkers.get(id);
+    if (e) {   // та сама ціль — просто пересуваємо й повертаємо (плавно, без миготіння)
+      e.marker.setLatLng([t.lat, t.lng]);
+      if (e.kind !== kind || e.brg !== t.bearing) { e.marker.setIcon(planeIcon(kind, t.bearing || 0)); e.kind = kind; e.brg = t.bearing; }
+      e.marker.setPopupContent(html);
+    } else {
+      const marker = L.marker([t.lat, t.lng], { icon: planeIcon(kind, t.bearing || 0), zIndexOffset: 800 })
+        .bindPopup(html).addTo(dimapGroup);
+      e = { marker, kind, brg: t.bearing, trail: null };
+      dimapMarkers.set(id, e);
     }
-    L.marker([t.lat, t.lng], { icon: planeIcon(kind, t.bearing || 0), zIndexOffset: 800 })
-      .bindPopup(`<b>${escapeHtml(label)}</b><br>курс ${Math.round(t.bearing || 0)}° · ${Math.round(t.speed || 0)} км/год` +
-        `<br>📍 ${t.lat.toFixed(3)}, ${t.lng.toFixed(3)}` +
-        (seenAt ? `<br><span style="color:#6ab0f3">${fmtTime(seenAt)}</span>` : "") +
-        `<hr><span style="color:#8b93a5">джерело: dimap.live</span>`)
-      .addTo(dimapGroup);
-    n++;
+    // слід руху
+    const pts = Array.isArray(t.history) ? t.history.map(p => Array.isArray(p) ? [p[0], p[1]] : (p && Number.isFinite(p.lat) ? [p.lat, p.lng] : null)).filter(Boolean) : [];
+    if (pts.length > 1) {
+      if (e.trail) e.trail.setLatLngs(pts);
+      else e.trail = L.polyline(pts, { color: "#ff9b3d", weight: 1.5, opacity: 0.6, dashArray: "3 5", interactive: false }).addTo(dimapGroup);
+    }
   });
-  dimapCount = n;
+  // цілі, яких уже немає в dimap — прибираємо
+  for (const [id, e] of dimapMarkers) {
+    if (alive.has(id)) continue;
+    dimapGroup.removeLayer(e.marker);
+    if (e.trail) dimapGroup.removeLayer(e.trail);
+    dimapMarkers.delete(id);
+  }
+  dimapCount = alive.size;
   render();
 }
 
@@ -1225,7 +1268,12 @@ let raionGeo = {};
 try { raionGeo = JSON.parse(localStorage.getItem("raionGeo") || "{}"); } catch (e) {}
 const raionQueue = []; let raionBusy = false, lastAir = [];
 function saveRaionGeo() { try { localStorage.setItem("raionGeo", JSON.stringify(raionGeo)); } catch (e) {} }
+let lastPaintSig = "";
 function paintRaions() {
+  // перемальовуємо лише коли щось змінилось (райони, кольори, нові межі)
+  const sig = lastAir.map(r => r.region + r.color + (raionGeo[r.region] ? 1 : 0)).sort().join("|");
+  if (sig === lastPaintSig) return;
+  lastPaintSig = sig;
   raionLayer.clearLayers();
   lastAir.forEach(r => {
     const g = raionGeo[r.region];
@@ -1331,9 +1379,9 @@ document.addEventListener("visibilitychange", () => {
 });
 
 refreshRaions();
-setInterval(refreshRaions, 30000);
+setInterval(refreshRaions, 10000);          // тривоги по районах — кожні 10 с
 refreshDimapTargets();
-setInterval(refreshDimapTargets, 15000);
+setInterval(refreshDimapTargets, 5000);     // цілі — кожні 5 с, як у dimap
 setInterval(render, 15000);  // показники «свіжості» оновлюються з часом, навіть без нових постів
 </script>
 </body>
