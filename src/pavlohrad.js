@@ -1,13 +1,13 @@
 // Бот: попередження про цілі в радіусі 20–150 км від Павлограда (Telegram).
 // Дані — dimap.live (з дозволу авторів). Cloudflare Cron запускає це щохвилини, а всередині
-// кожного запуску — дві перевірки з паузою 30 с, тож про нову ціль повідомляємо за ≤30 с.
+// кожного запуску — 12 перевірок з паузою 5 с, тож про нову ціль повідомляємо за ≈5 с.
 import { getSubs } from "./telegram.js";
 import { listUsers, saveUser, HOME } from "./link.js";
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
-const PASS_EVERY_MS = 30 * 1000;  // пауза між перевірками всередині одного запуску
-const PASSES = 2;                 // 2 перевірки на хвилину = раз на 30 с
+const PASS_EVERY_MS = 5 * 1000;   // пауза між перевірками всередині одного запуску
+const PASSES = 12;                // 12 перевірок на хвилину = раз на 5 с
 
 const R = 6371;
 const rad = d => d * Math.PI / 180;
@@ -138,12 +138,14 @@ export async function run(env) {
     const old = Array.isArray(raw.ids) ? raw.ids : [];   // старий формат: один спільний список
     st = { private: Array.isArray(raw.private) ? raw.private : old, group: Array.isArray(raw.group) ? raw.group : old };
   } catch { st = { private: [], group: [] }; }
+  let last = JSON.stringify(st);
   const users = await listUsers(env).catch(() => []);
   for (let i = 0; i < PASSES; i++) {
     if (i) await sleep(PASS_EVERY_MS);
     try {
       st = await pass(env, st, users);
-      await env.STATE.put("pavlohrad", JSON.stringify(st));
+      const dump = JSON.stringify(st);
+      if (dump !== last) { await env.STATE.put("pavlohrad", dump); last = dump; }   // у KV пишемо лише зміни (ліміти записів)
     } catch (e) { console.log("bot pass error", e && e.message); }
   }
 }

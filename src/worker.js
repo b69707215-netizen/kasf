@@ -58,7 +58,7 @@ export default {
     if (request.method === "GET" && pathname === "/tg/setup") return setupWebhook(request, env);   // одноразове підключення бота
     return env.ASSETS.fetch(request);   // решта — статичні файли карти
   },
-  // щохвилини (Cron Trigger): дві перевірки з паузою 30 с — цілі біля Павлограда → Telegram
+  // щохвилини (Cron Trigger): 12 перевірок з паузою 5 с — цілі біля Павлограда → Telegram
   async scheduled(event, env, ctx) {
     ctx.waitUntil(runBot(env).catch(e => console.log("bot error", e && e.message)));
   },
