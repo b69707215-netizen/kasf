@@ -59,7 +59,17 @@ function updateRadius() {
 function setRadiusCenter(latlng, where) {
   radiusState.center = [latlng.lat, latlng.lng]; radiusState.where = where || "";
   saveRadius(); updateRadius();
-  map.fitBounds(L.latLng(radiusState.center).toBounds(radiusState.km * 2000), { padding: [20, 20] });
+  fitRadius();
+}
+
+/* на телефоні панель закриває низ карти — вписуємо коло у видиму частину над нею */
+function fitRadius() {
+  if (!radiusState.center) return;
+  const panel = document.getElementById("radiusPanel");
+  const mobile = window.innerWidth <= 800;
+  const h = radiusState.on ? Math.round(map.getSize().y - panel.offsetTop) : 0;
+  map.fitBounds(L.latLng(radiusState.center).toBounds(radiusState.km * 2000),
+    { paddingTopLeft: [20, mobile ? 70 : 20], paddingBottomRight: [20, mobile ? h + 10 : 20] });
 }
 
 function useMyLocation() {
@@ -90,7 +100,7 @@ function openRadius(on) {
   if (on) {
     document.getElementById("radiusKm").value = radiusState.km;
     document.getElementById("radiusKmLabel").textContent = radiusState.km + " км";
-    if (!radiusState.center) useMyLocation(); else { updateRadius(); }
+    if (!radiusState.center) useMyLocation(); else { updateRadius(); fitRadius(); }
   } else { radiusLayer.clearLayers(); }
 }
 

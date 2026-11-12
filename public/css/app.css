@@ -174,7 +174,9 @@
   .rs-sub { color: var(--muted); font-size: 11.5px; }
   @media (max-width: 800px) {
     #btnRadius { right: 98px; padding: 0 9px; font-size: 12px; }
-    #radiusPanel { left: 8px; right: 8px; width: auto; bottom: 76px; }
+    #radiusPanel { left: 8px; right: 8px; width: auto; bottom: 76px; padding: 8px 10px; }
+    #radiusStatus { max-height: 20vh; }
+    #timestamp { max-width: calc(100% - 200px) !important; }
   }
   /* три режими: Карта / Тривоги / Цілі */
   #modeBar {
@@ -227,3 +229,7 @@
     z-index: 1000; background: #5a2530; color: #ffd7d7; border-radius: 8px;
     padding: 6px 14px; font-size: 12px; display: none;
   }
+
+  /* прибрано за запитом: кнопка панелі ☰ та перемикач шарів */
+  #btnSide, .leaflet-control-layers, .leaflet-control-zoom { display: none !important; }
+  #btnRadius { right: 10px !important; }
