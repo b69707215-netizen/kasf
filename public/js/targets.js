@@ -219,6 +219,7 @@ async function refreshDimapTargets() {
   }
   dimapList = list;
   dimapCount = alive.size;
+  if (typeof updateRadius === "function") updateRadius();   // оновлюємо перевірку радіуса
   render();
 }
 

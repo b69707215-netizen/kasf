@@ -48,6 +48,13 @@ if (!/^https?:$/.test(location.protocol)) {
     <div id="loading"><div class="spin"></div><div>Завантажуємо карту…</div></div>
     <button id="btnSide" title="Показати/сховати панель">☰</button>
     <!-- Три режими: 1) нормальна карта, 2) де зараз тривога, 3) що і куди летить -->
+    <button id="btnRadius" title="Перевірити радіус навколо мене (до 100 км)">📍 Радіус</button>
+    <div id="radiusPanel">
+      <div class="rp-head"><b>📍 Радіус перевірки</b><button id="radiusClose" title="Закрити">✕</button></div>
+      <div class="rp-range"><input type="range" id="radiusKm" min="5" max="100" step="5" value="20"><span id="radiusKmLabel">20 км</span></div>
+      <div class="rp-btns"><button id="radiusMe">Моє місце</button><button id="radiusPick">На карті</button></div>
+      <div id="radiusStatus"></div>
+    </div>
     <div id="modeBar">
       <button data-layer="alerts" title="Показати / сховати райони в тривозі">🚨 Тривоги</button>
       <button data-layer="targets" title="Показати / сховати цілі">🎯 Цілі</button>
@@ -69,6 +76,7 @@ if (!/^https?:$/.test(location.protocol)) {
 <script src="js/official.js?v=1"></script>
 <script src="js/targets.js?v=1"></script>
 <script src="js/raions.js?v=1"></script>
+<script src="js/radius.js?v=1"></script>
 <script src="js/app.js?v=1"></script>
 </body>
 </html>
