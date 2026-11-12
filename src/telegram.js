@@ -40,8 +40,8 @@ export async function handleWebhook(request, env) {
     await tgApi(env, "sendMessage", { chat_id: chat, text: HELLO, reply_markup: KEYBOARD });
   } else if (text.startsWith("/code") || text.includes("код для карти")) {
     const code = await issueCode(env, chat);
-    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: code
-      ? `Ваш код: ${code}\n\nВідкрийте карту → 📍 Радіус → «Підключити бота» і введіть цей код (діє 10 хвилин). Після цього бот сповіщатиме про цілі саме у вашому радіусі.`
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, parse_mode: "HTML", text: code
+      ? `Ваш код (натисніть на нього, щоб скопіювати):\n\n<code>${code}</code>\n\nВідкрийте карту → 📍 Радіус → «Підключити бота» і введіть цей код (діє 10 хвилин). Після цього бот сповіщатиме про цілі саме у вашому радіусі.`
       : "Сховище недоступне, спробуйте пізніше." });
   } else if (text.startsWith("/stop")) {
     await unlink(env, chat);
