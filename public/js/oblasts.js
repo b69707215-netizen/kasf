@@ -43,10 +43,10 @@ function oblastStyle(key) {
   if (currentMode === "map") return { fillColor: "#262d3a", fillOpacity: 0.28, color: "#4a5670", weight: 1.2 };
   const s = oblastState[key];
   if (s === "alert") return {
-    fillColor: "#a91f1f", fillOpacity: 0.6, color: "#ff5a5a", weight: 2
+    fillColor: "#8f2222", fillOpacity: 0.42, color: "#c04848", weight: 1.4
   };
   if (s === "threat") return {
-    fillColor: "#c9a227", fillOpacity: 0.5, color: "#e8c94f", weight: 2
+    fillColor: "#8a7620", fillOpacity: 0.36, color: "#b09a3a", weight: 1.4
   };
   if (s === "clear") return {
     fillColor: "#1b2230", fillOpacity: 0.22, color: "#46506a", weight: 1.5
@@ -180,6 +180,7 @@ async function loadOblasts() {
           map.options.maxBoundsViscosity = 1.0;
           fitUkraine();
           map.setMaxBounds(unionBounds.pad(0.05));
+          readyFlags.oblasts = true; checkReady();
         }
         recomputeOblastStates();
       })

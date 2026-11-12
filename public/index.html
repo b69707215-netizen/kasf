@@ -6,6 +6,17 @@
 <title>Карта тривог України у реальному часі (з Telegram)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="css/app.css?v=1">
+<script>
+/* Сайт складається з окремих файлів (css/, js/), тому його не можна відкривати просто як файл — лише через сервер. */
+if (!/^https?:$/.test(location.protocol)) {
+  document.addEventListener("DOMContentLoaded", function () {
+    document.body.innerHTML = '<div style="font-family:Segoe UI,sans-serif;padding:28px;max-width:560px;margin:40px auto;color:#222;line-height:1.5">' +
+      '<h2>Відкрийте карту через сервер</h2>' +
+      '<p>Файл відкрито напряму, тому стилі й скрипти не завантажуються.</p>' +
+      '<p>Запустіть <b>run.cmd</b> і відкрийте <b>http://127.0.0.1:8802/index.html</b> (або відкрийте посилання Cloudflare).</p></div>';
+  });
+}
+</script>
 </head>
 <body>
 <div id="app">
@@ -34,6 +45,7 @@
   </aside>
   <main id="mapwrap">
     <div id="map"></div>
+    <div id="loading"><div class="spin"></div><div>Завантажуємо карту…</div></div>
     <button id="btnSide" title="Показати/сховати панель">☰</button>
     <!-- Три режими: 1) нормальна карта, 2) де зараз тривога, 3) що і куди летить -->
     <div id="modeBar">

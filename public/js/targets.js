@@ -60,6 +60,23 @@ function targetIcon(key, deg) {
   });
 }
 
+/* Плавне пересування цілі до нової позиції (без CSS-переходу, тому при русі/зумі карти цілі
+   не «їдуть» за курсором: позиція змінюється лише коли приходять нові дані). */
+function moveMarker(e, to) {
+  if (e.raf) { cancelAnimationFrame(e.raf); e.raf = null; }
+  const from = e.marker.getLatLng();
+  const dist = map.distance(from, to);
+  if (dist < 5 || dist > 80000) { e.marker.setLatLng(to); return; }   // майже на місці або «стрибок» — одразу
+  const t0 = performance.now(), D = 4500;
+  const step = now => {
+    if (map._animatingZoom) { e.raf = requestAnimationFrame(step); return; }   // під час анімації зуму не чіпаємо позицію
+    const k = Math.min(1, (now - t0) / D);
+    e.marker.setLatLng([from.lat + (to[0] - from.lat) * k, from.lng + (to[1] - from.lng) * k]);
+    e.raf = k < 1 ? requestAnimationFrame(step) : null;
+  };
+  e.raf = requestAnimationFrame(step);
+}
+
 /* Допоміжне: сторона світу, найближчий населений пункт, область у точці */
 const COMPASS = ["північ", "північний схід", "схід", "південний схід", "південь", "південний захід", "захід", "північний захід"];
 function compassUk(deg) { return COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]; }
@@ -159,7 +176,7 @@ async function refreshDimapTargets() {
 
     let e = dimapMarkers.get(id);
     if (e) {   // та сама ціль — пересуваємо й повертаємо без миготіння
-      e.marker.setLatLng(here);
+      moveMarker(e, here);
       if (e.key !== key || e.brg !== brg) { e.marker.setIcon(targetIcon(key, brg)); e.key = key; e.brg = brg; }
       e.marker.setPopupContent(html);
     } else {
@@ -196,6 +213,7 @@ async function refreshDimapTargets() {
   // цілі, яких уже немає в dimap — прибираємо
   for (const [id, e] of dimapMarkers) {
     if (alive.has(id)) continue;
+    if (e.raf) cancelAnimationFrame(e.raf);
     [e.marker, e.trail, e.ray, e.rayEnd, e.zone].forEach(l => l && dimapGroup.removeLayer(l));
     dimapMarkers.delete(id);
   }

@@ -24,7 +24,7 @@ function paintRaions() {
     const g = raionGeo[r.region];
     if (!g) return;
     const red = r.color === "red";
-    L.geoJSON(g, { style: { fillColor: red ? "#c93232" : "#a08a22", fillOpacity: red ? 0.72 : 0.62, color: "rgba(255,255,255,.55)", weight: 0.8 } })
+    L.geoJSON(g, { style: { fillColor: red ? "#a82a2a" : "#8a7620", fillOpacity: red ? 0.58 : 0.5, color: "rgba(255,255,255,.28)", weight: 0.7 } })
       .bindPopup(`<b>${escapeHtml(r.region)}</b><br>${red ? "🔴 повітряна тривога" : "🟡 загроза"}<br><span style="font-size:11px;color:#8b93a5">джерело: dimap.live</span>`)
       .addTo(raionLayer);
   });
