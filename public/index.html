@@ -578,6 +578,19 @@ function recomputeOblastStates() {
   updateOblastStyles();
 }
 
+let ukrBounds = null;
+/* вписує Україну у вікно карти; перераховується, коли змінився розмір вікна чи панелі */
+function fitUkraine() {
+  if (!ukrBounds) return;
+  map.invalidateSize();
+  const s = map.getSize();
+  if (s.x < 50 || s.y < 50) { setTimeout(fitUkraine, 200); return; }   // вікно ще не отримало розмір
+  map.setMinZoom(0);
+  map.fitBounds(ukrBounds, { padding: [8, 8] });
+  map.setMinZoom(Math.floor(map.getZoom()));
+}
+window.addEventListener("resize", () => { clearTimeout(fitUkraine._t); fitUkraine._t = setTimeout(fitUkraine, 150); });
+
 async function loadOblasts() {
   const ukr = await UKR;
   let loaded = 0;
@@ -632,10 +645,10 @@ async function loadOblasts() {
             pane: "mask", stroke: false, fillColor: "#11151c", fillOpacity: 1, interactive: false
           }).addTo(map);
           // вписуємо карту в Україну й не даємо відлітати
-          map.fitBounds(unionBounds, { padding: [8, 8] });
-          map.setMaxBounds(unionBounds.pad(0.05));
+          ukrBounds = unionBounds;
           map.options.maxBoundsViscosity = 1.0;
-          map.setMinZoom(map.getBoundsZoom(unionBounds.pad(0.05)));
+          fitUkraine();
+          map.setMaxBounds(unionBounds.pad(0.05));
         }
         recomputeOblastStates();
       })
