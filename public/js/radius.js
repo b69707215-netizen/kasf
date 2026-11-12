@@ -77,9 +77,9 @@ function useMyLocation() {
   if (!navigator.geolocation) { box.innerHTML = `<span class="rs-warn">Браузер не підтримує геолокацію. Оберіть центр «На карті».</span>`; return; }
   box.innerHTML = `<span class="rs-note">📍 Визначаю місцезнаходження…</span>`;
   navigator.geolocation.getCurrentPosition(
-    pos => setRadiusCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }, "ваше місце"),
+    pos => setRadiusCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }, "ваше місце, точність ±" + Math.round(pos.coords.accuracy) + " м"),
     err => { box.innerHTML = `<span class="rs-warn">Не вдалося визначити місце (${err.code === 1 ? "доступ заборонено" : "помилка"}). Дозвольте геолокацію для сайту або оберіть центр «На карті».</span>`; },
-    { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
   );
 }
 
