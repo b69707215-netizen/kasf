@@ -5,6 +5,7 @@
 import { issueCode, unlink, setRadiusFromBot, setLocationFromBot } from "./link.js";
 
 export async function tgApi(env, method, body) {
+  if (body && body.reply_markup && Number(body.chat_id) < 0) body = { ...body, reply_markup: undefined };   // у групах кнопок-клавіатури немає
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
   });
@@ -18,8 +19,11 @@ export async function getSubs(env) {
 }
 async function setSubs(env, arr) { if (env.STATE) await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); }
 
-const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
+const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 30 км від Павлограда, " +
   "і напишу «відбій», коли небезпека мине.\n\nЩоб отримувати сповіщення про свій радіус з карти — натисніть «📍 Моя геолокація» (радіус до 150 км — кнопка «📏 Радіус») або підключіть карту кнопкою «🔗 Код для карти».\n\nЩоб відписатися — /stop";
+const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сюди про цілі в радіусі 30 км від Павлограда і «відбій», коли небезпека мине.\n\n" +
+  "Свій центр і радіус для групи: /code — код для карти (введіть його на карті) та /radius 50 (до 150 км).\n" +
+  "Якщо бот не бачить команд — зробіть його адміністратором групи. Зупинити — /stop";
 const KEYBOARD = { keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }], [{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
   [{ text: "📏 150 км" }, { text: "← Назад" }]], resize_keyboard: true };
@@ -32,6 +36,19 @@ export async function handleWebhook(request, env) {
   }
   let update;
   try { update = await request.json(); } catch { return new Response("ok"); }
+  const mcm = update && update.my_chat_member;   // бота додали в групу / видалили з неї
+  if (mcm && mcm.chat && mcm.chat.type !== "private") {
+    const gid = String(mcm.chat.id), st = mcm.new_chat_member && mcm.new_chat_member.status;
+    if (st === "member" || st === "administrator") {
+      const subs = await getSubs(env);
+      if (!subs.includes(gid)) await setSubs(env, [...subs, gid]);
+      await tgApi(env, "sendMessage", { chat_id: gid, text: GROUP_HELLO });
+    } else if (st === "left" || st === "kicked") {
+      await unlink(env, gid);
+      await setSubs(env, (await getSubs(env)).filter(c => c !== gid));
+    }
+    return new Response("ok");
+  }
   const live = !!(update && update.edited_message && update.edited_message.location);   // оновлення «живої» геолокації
   const m = update && (update.message || (live ? update.edited_message : null));
   if (!m || !m.chat) return new Response("ok");
@@ -45,7 +62,7 @@ export async function handleWebhook(request, env) {
     return new Response("ok");
   }
   if (!m.text) return new Response("ok");
-  const chat = String(m.chat.id), text = m.text.trim().toLowerCase();
+  const chat = String(m.chat.id), text = m.text.trim().toLowerCase().replace(/@\w+/g, "").replace(/\s+/g, " ").trim();   // без @імені бота (команди в групах)
 
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
@@ -59,7 +76,7 @@ export async function handleWebhook(request, env) {
       await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: RADIUS_KB, text: "Оберіть радіус (до 150 км) або напишіть, напр.: /radius 120" });
     } else {
       const res = await setRadiusFromBot(env, chat, +n[1]);
-      const msg = res === "nolink" ? "Спершу задайте центр: натисніть «📍 Моя геолокація» (або підключіть карту кодом)."
+      const msg = res === "nolink" ? "Спершу задайте центр: «📍 Моя геолокація» (в особистому чаті) або /code — підключіть карту."
         : res === "range" ? "Радіус має бути від 5 до 150 км."
         : `✅ Радіус ${res} км. Центр — ваша остання геолокація або точка з карти.`;
       await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : KEYBOARD });
@@ -81,7 +98,7 @@ export async function handleWebhook(request, env) {
 export async function setupWebhook(request, env) {
   if (!env.BOT_TOKEN) return new Response("BOT_TOKEN не задано (Settings → Variables and Secrets)", { status: 400 });
   const hook = new URL(request.url).origin + "/tg";
-  const body = { url: hook, allowed_updates: ["message", "edited_message"] };
+  const body = { url: hook, allowed_updates: ["message", "edited_message", "my_chat_member"] };
   if (env.WEBHOOK_SECRET) {
     // Telegram приймає секрет лише з латинських літер, цифр, «_» і «-» (1–256 символів)
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) {

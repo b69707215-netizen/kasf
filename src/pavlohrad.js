@@ -1,10 +1,10 @@
-// Бот: попередження про цілі в радіусі 20 км від Павлограда (Telegram).
+// Бот: попередження про цілі в радіусі 30 км від Павлограда (Telegram).
 // Дані — dimap.live (з дозволу авторів). Cloudflare Cron запускає це щохвилини, а всередині
 // кожного запуску — дві перевірки з паузою 30 с, тож про нову ціль повідомляємо за ≤30 с.
 import { getSubs } from "./telegram.js";
 import { listUsers, saveUser } from "./link.js";
 export const CENTER = { lat: 48.52, lng: 35.87, name: "Павлоград" };
-export const RADIUS_KM = 20;
+export const RADIUS_KM = 30;
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
 const PASS_EVERY_MS = 30 * 1000;  // пауза між перевірками всередині одного запуску
 const PASSES = 2;                 // 2 перевірки на хвилину = раз на 30 с
