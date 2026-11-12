@@ -1,10 +1,10 @@
-// Бот: попередження про цілі в радіусі 30 км від Павлограда (Telegram).
+// Бот: попередження про цілі в радіусі 20–150 км від Павлограда (Telegram).
 // Дані — dimap.live (з дозволу авторів). Cloudflare Cron запускає це щохвилини, а всередині
 // кожного запуску — дві перевірки з паузою 30 с, тож про нову ціль повідомляємо за ≤30 с.
 import { getSubs } from "./telegram.js";
-import { listUsers, saveUser } from "./link.js";
-export const CENTER = { lat: 48.52, lng: 35.87, name: "Павлоград" };
-export const RADIUS_KM = 30;
+import { listUsers, saveUser, HOME } from "./link.js";
+export const CENTER = { ...HOME, name: "Павлоград" };
+export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
 const PASS_EVERY_MS = 30 * 1000;  // пауза між перевірками всередині одного запуску
 const PASSES = 2;                 // 2 перевірки на хвилину = раз на 30 с
@@ -54,15 +54,16 @@ export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RA
   return out.sort((a, b) => a.km - b.km);
 }
 
-export function alertText(list) {
+/* Текст для «домашнього» центру (Павлоград) */
+export function alertText(list, km = RADIUS_KM) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від ${CENTER.name}а\n   курс ${t.course}°, ${t.speed} км/год` +
     (t.toward ? `\n   ➜ летить на ${CENTER.name}, ~${t.etaMin} хв` : `\n   не прямо на ${CENTER.name} (за курсом)`));
-  return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${RADIUS_KM} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
+  return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
 }
-export const clearText = () => `✅ ВІДБІЙ. В радіусі ${RADIUS_KM} км від ${CENTER.name}а цілей більше немає.`;
+export const clearText = (km = RADIUS_KM) => `✅ ВІДБІЙ. В радіусі ${km} км від ${CENTER.name}а цілей більше немає.`;
 
-/* Текст для користувача з прив'язаної карти (радіус довкола його точки) */
+/* Текст для власної точки користувача (з карти або геолокації) */
 export function userAlertText(list, km) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від вас\n   курс ${t.course}°, ${t.speed} км/год` +
@@ -78,51 +79,50 @@ async function sendOne(env, chat_id, text) {
   if (!r.ok) console.log("telegram send failed", chat_id, r.status);
 }
 
-/* Радіуси користувачів з карти: нова ціль → повідомлення, порожньо → відбій */
+/* Індивідуальні налаштування (власна точка або змінений радіус від Павлограда):
+   нова ціль → повідомлення, порожньо → відбій */
 async function passUsers(env, users, targets) {
   for (const u of users) {
     const list = nearTargets(targets, Date.now(), { lat: u.lat, lng: u.lng }, u.km);
     const ids = list.map(t => t.id), prev = u.ids || [];
     let msg = null;
-    if (ids.some(id => !prev.includes(id))) msg = userAlertText(list, u.km);
-    else if (!list.length && prev.length) msg = `✅ ВІДБІЙ. У вашому радіусі ${u.km} км цілей більше немає.`;
+    if (ids.some(id => !prev.includes(id))) msg = u.home ? alertText(list, u.km) : userAlertText(list, u.km);
+    else if (!list.length && prev.length) msg = u.home ? clearText(u.km) : `✅ ВІДБІЙ. У вашому радіусі ${u.km} км цілей більше немає.`;
     if (msg) await sendOne(env, u.chat, msg);
     if (ids.join() !== prev.join()) { u.ids = ids; await saveUser(env, u); }
   }
 }
 
-async function sendTelegram(env, text) {
-  // одержувачі: ті, хто натиснув /start (KV), + необов'язковий список CHAT_IDS
+/* Стандартні чати без своїх налаштувань: особисті — Павлоград 20 км, групи — Павлоград 30 км */
+const DEFAULT_KM = { private: 20, group: 30 };
+
+async function defaultChats(env, users) {
   const fixed = String(env.CHAT_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
-  const ids = [...new Set([...fixed, ...(await getSubs(env))])];
-  for (const chat_id of ids) {
-    const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id, text, disable_web_page_preview: true })
-    });
-    if (!r.ok) console.log("telegram send failed", chat_id, r.status);
-  }
+  const own = new Set(users.map(u => u.chat));
+  const ids = [...new Set([...fixed, ...(await getSubs(env))])].filter(c => !own.has(c));
+  return { private: ids.filter(c => Number(c) >= 0), group: ids.filter(c => Number(c) < 0) };
 }
 
-/* Одна перевірка. st = { ids: [...id цілей, про які вже повідомили] }.
-   Нова ціль у радіусі → повідомлення про всі поточні. Радіус спорожнів → одразу «відбій». */
+/* Одна перевірка. st = { private: [id], group: [id] } — про які цілі вже повідомили (окремо для 20 і 30 км). */
 async function pass(env, st, users) {
   const r = await fetch("https://api.dimap.live/api/targets", { headers: { "User-Agent": "radf4-pavlohrad-bot" } });
   if (!r.ok) { console.log("dimap http", r.status); return st; }   // джерело недоступне — нічого не вирішуємо
   const data = await r.json();
   if (!Array.isArray(data.targets)) return st;
   await passUsers(env, users, data.targets).catch(e => console.log("users pass error", e && e.message));
-  const list = nearTargets(data.targets);
-  const ids = list.map(t => t.id);
-  if (ids.some(id => !st.ids.includes(id))) {
-    await sendTelegram(env, alertText(list));
-    return { ids };
+  const chats = await defaultChats(env, users);
+  const next = { private: st.private, group: st.group };
+  for (const cls of ["private", "group"]) {
+    const km = DEFAULT_KM[cls], prev = st[cls];
+    const list = nearTargets(data.targets, Date.now(), CENTER, km);
+    const ids = list.map(t => t.id);
+    let msg = null;
+    if (ids.some(id => !prev.includes(id))) msg = alertText(list, km);
+    else if (!list.length && prev.length) msg = clearText(km);
+    if (msg) for (const c of chats[cls]) await sendOne(env, c, msg);
+    next[cls] = ids;
   }
-  if (!list.length && st.ids.length) {
-    await sendTelegram(env, clearText());
-    return { ids: [] };
-  }
-  return { ids };   // ті самі цілі (або нікого й раніше нікого) — мовчимо
+  return next;
 }
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
@@ -133,8 +133,11 @@ export async function run(env) {
   if (!env.BOT_TOKEN) { console.log("bot: BOT_TOKEN не заданий"); return; }
   if (!env.STATE) { console.log("bot: KV STATE не підключено — без нього не можна уникнути дублів"); return; }
   let st;
-  try { st = JSON.parse((await env.STATE.get("pavlohrad")) || '{"ids":[]}'); } catch { st = { ids: [] }; }
-  if (!Array.isArray(st.ids)) st = { ids: [] };
+  try {
+    const raw = JSON.parse((await env.STATE.get("pavlohrad")) || "{}");
+    const old = Array.isArray(raw.ids) ? raw.ids : [];   // старий формат: один спільний список
+    st = { private: Array.isArray(raw.private) ? raw.private : old, group: Array.isArray(raw.group) ? raw.group : old };
+  } catch { st = { private: [], group: [] }; }
   const users = await listUsers(env).catch(() => []);
   for (let i = 0; i < PASSES; i++) {
     if (i) await sleep(PASS_EVERY_MS);

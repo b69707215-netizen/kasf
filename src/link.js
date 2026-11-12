@@ -40,7 +40,7 @@ export async function linkFromMap(request, env) {
   if (old && old.token) await env.STATE.delete("t:" + old.token);   // стара прив'язка недійсна
   const token = rnd(18).map(x => x.toString(16).padStart(2, "0")).join("");
   await env.STATE.put("t:" + token, chat);
-  await env.STATE.put("u:" + chat, JSON.stringify({ lat: b.lat, lng: b.lng, km: Math.round(b.km), token, ids: [] }));
+  await env.STATE.put("u:" + chat, JSON.stringify({ lat: b.lat, lng: b.lng, km: Math.round(b.km), home: false, token, ids: [] }));
   await say(env, chat, `✅ Карту підключено. Сповіщатиму про цілі в радіусі ${Math.round(b.km)} км від вашої точки. Радіус змінюється на карті — бот оновиться сам.`);
   return json({ ok: true, token });
 }
@@ -55,18 +55,30 @@ export async function syncFromMap(request, env) {
   if (!okRadius(b)) return json({ error: "bad_radius" }, 400);
   const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || { token: b.token, ids: [] };
   const moved = u.lat !== b.lat || u.lng !== b.lng || u.km !== Math.round(b.km);
-  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat: b.lat, lng: b.lng, km: Math.round(b.km), ids: moved ? [] : u.ids }));
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat: b.lat, lng: b.lng, km: Math.round(b.km), home: false, ids: moved ? [] : u.ids }));
   return json({ ok: true });
 }
 
-/* Бот: змінити радіус (5–150 км) для вже підключеного чату. Повертає км, "nolink" або "range". */
+/* Стандартний центр — Павлоград. Без власної точки бот рахує радіус від нього. */
+export const HOME = { lat: 48.52, lng: 35.87 };
+const defaultKm = chat => (Number(chat) < 0 ? 30 : 20);
+
+/* Бот: змінити радіус (5–150 км). Без власної точки центр — Павлоград. Повертає { km, home } або "range". */
 export async function setRadiusFromBot(env, chat, km) {
-  if (!env.STATE) return "nolink";
-  if (!Number.isFinite(km) || km < 5 || km > 150) return "range";
+  if (!env.STATE || !Number.isFinite(km) || km < 5 || km > 150) return "range";
+  km = Math.round(km);
+  const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || { ...HOME, home: true };
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, km, ids: [] }));
+  return { km, home: !!u.home };
+}
+
+/* Бот: повернутись до центру Павлоград (власна точка видаляється, радіус лишається) */
+export async function setHomeFromBot(env, chat) {
+  if (!env.STATE) return null;
   const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null");
-  if (!u) return "nolink";
-  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, km: Math.round(km), ids: [] }));
-  return Math.round(km);
+  if (u && u.token) await env.STATE.delete("t:" + u.token);
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...HOME, home: true, km: (u && u.km) || defaultKm(chat), ids: [] }));
+  return (u && u.km) || defaultKm(chat);
 }
 
 export async function unlink(env, chat) {
@@ -101,9 +113,9 @@ export async function saveUser(env, u) {
 export async function setLocationFromBot(env, chat, lat, lng, live = false) {
   if (!env.STATE || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || {};
-  const km = u.km || 20;
+  const km = u.km || (Number(chat) < 0 ? 30 : 20);
   if (live && Number.isFinite(u.lat) && Math.hypot((lat - u.lat) * 111, (lng - u.lng) * 70) < 0.1) return km;   // зсув <100 м — не пишемо в KV
   // «жива» точка: не скидаємо ids, щоб не повторювати сповіщення про ті самі цілі
-  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, ids: live ? (u.ids || []) : [] }));
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, home: false, ids: live ? (u.ids || []) : [] }));
   return km;
 }

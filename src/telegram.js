@@ -2,7 +2,7 @@
 // Telegram надсилає повідомлення користувачів на webhook цього Worker (POST /tg).
 // Підписники зберігаються в KV (ключ "subs"); сповіщення про цілі йдуть усім підписникам.
 
-import { issueCode, unlink, setRadiusFromBot, setLocationFromBot } from "./link.js";
+import { issueCode, unlink, setRadiusFromBot, setLocationFromBot, setHomeFromBot } from "./link.js";
 
 export async function tgApi(env, method, body) {
   if (body && body.reply_markup && Number(body.chat_id) < 0) body = { ...body, reply_markup: undefined };   // у групах кнопок-клавіатури немає
@@ -19,14 +19,16 @@ export async function getSubs(env) {
 }
 async function setSubs(env, arr) { if (env.STATE) await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); }
 
-const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 30 км від Павлограда, " +
-  "і напишу «відбій», коли небезпека мине.\n\nЩоб отримувати сповіщення про свій радіус з карти — натисніть «📍 Моя геолокація» (радіус до 150 км — кнопка «📏 Радіус») або підключіть карту кнопкою «🔗 Код для карти».\n\nЩоб відписатися — /stop";
+const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
+  "і напишу «відбій», коли небезпека мине.\n\n📏 «Радіус» — змінити радіус (до 150 км).\n" +
+  "📍 «Моя геолокація» — поставити свою точку замість Павлограда (один раз; для постійної — «Поділитися геопозицією» через 📎).\n" +
+  "🔗 «Код для карти» — підключити карту.\n\nЩоб відписатися — /stop";
 const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сюди про цілі в радіусі 30 км від Павлограда і «відбій», коли небезпека мине.\n\n" +
   "Свій центр і радіус для групи: /code — код для карти (введіть його на карті) та /radius 50 (до 150 км).\n" +
   "Якщо бот не бачить команд — зробіть його адміністратором групи. Зупинити — /stop";
 const KEYBOARD = { keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }], [{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
-  [{ text: "📏 150 км" }, { text: "← Назад" }]], resize_keyboard: true };
+  [{ text: "📏 150 км" }, { text: "🏠 Павлоград" }, { text: "← Назад" }]], resize_keyboard: true };
 const BYE = "Добре, більше не надсилатиму. Щоб повернутись — /start";
 
 /* Вхідні повідомлення від Telegram (webhook) */
@@ -68,6 +70,9 @@ export async function handleWebhook(request, env) {
     const subs = await getSubs(env);
     if (!subs.includes(chat)) await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
     await tgApi(env, "sendMessage", { chat_id: chat, text: HELLO, reply_markup: KEYBOARD });
+  } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
+    const km = await setHomeFromBot(env, chat);
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
   } else if (text === "← назад") {
     await tgApi(env, "sendMessage", { chat_id: chat, text: "Ок.", reply_markup: KEYBOARD });
   } else if (/^(\/radius|📏)/.test(text)) {
@@ -76,9 +81,8 @@ export async function handleWebhook(request, env) {
       await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: RADIUS_KB, text: "Оберіть радіус (до 150 км) або напишіть, напр.: /radius 120" });
     } else {
       const res = await setRadiusFromBot(env, chat, +n[1]);
-      const msg = res === "nolink" ? "Спершу задайте центр: «📍 Моя геолокація» (в особистому чаті) або /code — підключіть карту."
-        : res === "range" ? "Радіус має бути від 5 до 150 км."
-        : `✅ Радіус ${res} км. Центр — ваша остання геолокація або точка з карти.`;
+      const msg = res === "range" ? "Радіус має бути від 5 до 150 км."
+        : `✅ Радіус ${res.km} км. ` + (res.home ? "Центр — Павлоград. Своя точка: «📍 Моя геолокація»." : "Центр — ваша точка.");
       await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : KEYBOARD });
     }
   } else if (text.startsWith("/code") || text.includes("код для карти")) {
