@@ -32,12 +32,15 @@ export async function handleWebhook(request, env) {
   }
   let update;
   try { update = await request.json(); } catch { return new Response("ok"); }
-  const m = update && update.message;
+  const live = !!(update && update.edited_message && update.edited_message.location);   // оновлення «живої» геолокації
+  const m = update && (update.message || (live ? update.edited_message : null));
   if (!m || !m.chat) return new Response("ok");
   if (m.location) {   // геолокація з Telegram → центр радіуса (без карти)
-    const km = await setLocationFromBot(env, String(m.chat.id), m.location.latitude, m.location.longitude);
+    const km = await setLocationFromBot(env, String(m.chat.id), m.location.latitude, m.location.longitude, live);
+    if (live) return new Response("ok");   // тихе оновлення «живої» точки — без повідомлень
     await tgApi(env, "sendMessage", { chat_id: m.chat.id, reply_markup: KEYBOARD, text: km
-      ? `✅ Центр радіуса — ваша геолокація, радіус ${km} км. Змінити радіус — кнопка «📏 Радіус» (до 150 км). Бот сповіщатиме про цілі навколо вас.`
+      ? `✅ Центр радіуса — ваша геолокація, радіус ${km} км. Змінити радіус — кнопка «📏 Радіус» (до 150 км). Бот сповіщатиме про цілі навколо вас.` +
+        (m.location.live_period ? "\n\n🔴 Жива геолокація ввімкнена — центр рухається разом із вами." : "\n\nЩоб центр рухався за вами: скріпка 📎 → Геопозиція → «Поділитися геопозицією» (на 8 годин).")
       : "Не вдалося зберегти геолокацію, спробуйте пізніше." });
     return new Response("ok");
   }
@@ -78,7 +81,7 @@ export async function handleWebhook(request, env) {
 export async function setupWebhook(request, env) {
   if (!env.BOT_TOKEN) return new Response("BOT_TOKEN не задано (Settings → Variables and Secrets)", { status: 400 });
   const hook = new URL(request.url).origin + "/tg";
-  const body = { url: hook, allowed_updates: ["message"] };
+  const body = { url: hook, allowed_updates: ["message", "edited_message"] };
   if (env.WEBHOOK_SECRET) {
     // Telegram приймає секрет лише з латинських літер, цифр, «_» і «-» (1–256 символів)
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) {

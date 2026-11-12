@@ -98,10 +98,12 @@ export async function saveUser(env, u) {
 }
 
 /* Бот: центр радіуса з геолокації Telegram (кнопка «📍 Моя геолокація»). Працює і без карти. */
-export async function setLocationFromBot(env, chat, lat, lng) {
+export async function setLocationFromBot(env, chat, lat, lng, live = false) {
   if (!env.STATE || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || {};
   const km = u.km || 20;
-  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, ids: [] }));
+  if (live && Number.isFinite(u.lat) && Math.hypot((lat - u.lat) * 111, (lng - u.lng) * 70) < 0.1) return km;   // зсув <100 м — не пишемо в KV
+  // «жива» точка: не скидаємо ids, щоб не повторювати сповіщення про ті самі цілі
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, ids: live ? (u.ids || []) : [] }));
   return km;
 }
