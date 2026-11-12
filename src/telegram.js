@@ -47,7 +47,14 @@ export async function setupWebhook(request, env) {
   if (!env.BOT_TOKEN) return new Response("BOT_TOKEN не задано (Settings → Variables and Secrets)", { status: 400 });
   const hook = new URL(request.url).origin + "/tg";
   const body = { url: hook, allowed_updates: ["message"] };
-  if (env.WEBHOOK_SECRET) body.secret_token = env.WEBHOOK_SECRET;
+  if (env.WEBHOOK_SECRET) {
+    // Telegram приймає секрет лише з латинських літер, цифр, «_» і «-» (1–256 символів)
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) {
+      return new Response("WEBHOOK_SECRET має недозволені символи. Дозволено лише латинські літери, цифри, _ і - (без пробілів, крапок і кирилиці). " +
+        "Змініть його в Settings → Variables and Secrets, напр. на: damih_tg_2026_ab12cd34", { status: 400, headers: { "content-type": "text/plain; charset=utf-8" } });
+    }
+    body.secret_token = env.WEBHOOK_SECRET;
+  }
   const r = await tgApi(env, "setWebhook", body);
   const j = await r.json().catch(() => ({}));
   return new Response(JSON.stringify({ webhook: hook, telegram: j }, null, 2), { headers: { "content-type": "application/json; charset=utf-8" } });
