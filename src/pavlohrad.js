@@ -58,7 +58,7 @@ export function alertText(list) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від ${CENTER.name}а\n   курс ${t.course}°, ${t.speed} км/год` +
     (t.toward ? `\n   ➜ летить на ${CENTER.name}, ~${t.etaMin} хв` : `\n   не прямо на ${CENTER.name} (за курсом)`));
-  return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${RADIUS_KM} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/tg/`;
+  return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${RADIUS_KM} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
 }
 export const clearText = () => `✅ ВІДБІЙ. В радіусі ${RADIUS_KM} км від ${CENTER.name}а цілей більше немає.`;
 
@@ -67,7 +67,7 @@ export function userAlertText(list, km) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від вас\n   курс ${t.course}°, ${t.speed} км/год` +
     (t.toward ? `\n   ➜ летить на вас, ~${t.etaMin} хв` : "\n   не прямо на вас (за курсом)"));
-  return `⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/tg/`;
+  return `⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
 }
 
 async function sendOne(env, chat_id, text) {
