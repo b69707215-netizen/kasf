@@ -1,6 +1,8 @@
 // Cloudflare Worker: віддає карту (public/) і замінює локальний server.ps1:
 //   /proxy?url=...  — читає лише дозволені сайти (Telegram, dimap, джерела тривог)
 //   /alerts         — офіційне API alerts.in.ua (токен у секреті ALERTS_TOKEN)
+import { run as runBot } from "./pavlohrad.js";
+import { handleWebhook, setupWebhook } from "./telegram.js";
 const ALLOWED = new Set(["t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live"]);
 
 async function proxy(request) {
@@ -49,6 +51,12 @@ export default {
     const { pathname } = new URL(request.url);
     if (request.method === "GET" && pathname === "/proxy") return proxy(request);
     if (request.method === "GET" && pathname === "/alerts") return alerts(env);
+    if (request.method === "POST" && pathname === "/tg") return handleWebhook(request, env);   // повідомлення від Telegram
+    if (request.method === "GET" && pathname === "/tg/setup") return setupWebhook(request, env);   // одноразове підключення бота
     return env.ASSETS.fetch(request);   // решта — статичні файли карти
+  },
+  // щохвилини (Cron Trigger): дві перевірки з паузою 30 с — цілі біля Павлограда → Telegram
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runBot(env).catch(e => console.log("bot error", e && e.message)));
   },
 };

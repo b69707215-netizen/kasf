@@ -5,6 +5,10 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/proxy", "/alerts"]
-  }
+    "run_worker_first": ["/proxy", "/alerts", "/tg", "/tg/*"]
+  },
+  // Telegram-бот: щохвилини запуск, у ньому 2 перевірки з паузою 30 с (радіус 20 км від Павлограда)
+  "triggers": { "crons": ["* * * * *"] },
+  // сховище стану бота (хто вже був у радіусі); wrangler створює його автоматично при деплої
+  "kv_namespaces": [{ "binding": "STATE" }]
 }
