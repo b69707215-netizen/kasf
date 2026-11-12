@@ -96,3 +96,12 @@ export async function saveUser(env, u) {
   if (!cur || cur.token !== u.token) return;
   await env.STATE.put("u:" + u.chat, JSON.stringify({ ...cur, ids: u.ids }));
 }
+
+/* Бот: центр радіуса з геолокації Telegram (кнопка «📍 Моя геолокація»). Працює і без карти. */
+export async function setLocationFromBot(env, chat, lat, lng) {
+  if (!env.STATE || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || {};
+  const km = u.km || 20;
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, ids: [] }));
+  return km;
+}

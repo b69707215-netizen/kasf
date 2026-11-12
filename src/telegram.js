@@ -2,7 +2,7 @@
 // Telegram надсилає повідомлення користувачів на webhook цього Worker (POST /tg).
 // Підписники зберігаються в KV (ключ "subs"); сповіщення про цілі йдуть усім підписникам.
 
-import { issueCode, unlink, setRadiusFromBot } from "./link.js";
+import { issueCode, unlink, setRadiusFromBot, setLocationFromBot } from "./link.js";
 
 export async function tgApi(env, method, body) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
@@ -19,8 +19,8 @@ export async function getSubs(env) {
 async function setSubs(env, arr) { if (env.STATE) await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); }
 
 const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
-  "і напишу «відбій», коли небезпека мине.\n\nЩоб отримувати сповіщення про свій радіус з карти — натисніть «🔗 Код для карти».\n\nЩоб відписатися — /stop";
-const KEYBOARD = { keyboard: [[{ text: "🔗 Код для карти" }, { text: "📏 Радіус" }]], resize_keyboard: true, is_persistent: true };
+  "і напишу «відбій», коли небезпека мине.\n\nЩоб отримувати сповіщення про свій радіус з карти — натисніть «📍 Моя геолокація» (радіус до 150 км — кнопка «📏 Радіус») або підключіть карту кнопкою «🔗 Код для карти».\n\nЩоб відписатися — /stop";
+const KEYBOARD = { keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }], [{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
   [{ text: "📏 150 км" }, { text: "← Назад" }]], resize_keyboard: true };
 const BYE = "Добре, більше не надсилатиму. Щоб повернутись — /start";
@@ -33,7 +33,15 @@ export async function handleWebhook(request, env) {
   let update;
   try { update = await request.json(); } catch { return new Response("ok"); }
   const m = update && update.message;
-  if (!m || !m.text || !m.chat) return new Response("ok");
+  if (!m || !m.chat) return new Response("ok");
+  if (m.location) {   // геолокація з Telegram → центр радіуса (без карти)
+    const km = await setLocationFromBot(env, String(m.chat.id), m.location.latitude, m.location.longitude);
+    await tgApi(env, "sendMessage", { chat_id: m.chat.id, reply_markup: KEYBOARD, text: km
+      ? `✅ Центр радіуса — ваша геолокація, радіус ${km} км. Змінити радіус — кнопка «📏 Радіус» (до 150 км). Бот сповіщатиме про цілі навколо вас.`
+      : "Не вдалося зберегти геолокацію, спробуйте пізніше." });
+    return new Response("ok");
+  }
+  if (!m.text) return new Response("ok");
   const chat = String(m.chat.id), text = m.text.trim().toLowerCase();
 
   if (text.startsWith("/start")) {
@@ -48,9 +56,9 @@ export async function handleWebhook(request, env) {
       await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: RADIUS_KB, text: "Оберіть радіус (до 150 км) або напишіть, напр.: /radius 120" });
     } else {
       const res = await setRadiusFromBot(env, chat, +n[1]);
-      const msg = res === "nolink" ? "Спершу підключіть карту: натисніть «🔗 Код для карти» і введіть код на карті — центр радіуса задається там."
+      const msg = res === "nolink" ? "Спершу задайте центр: натисніть «📍 Моя геолокація» (або підключіть карту кодом)."
         : res === "range" ? "Радіус має бути від 5 до 150 км."
-        : `✅ Радіус ${res} км. Центр — точка, яку ви підтвердили на карті.`;
+        : `✅ Радіус ${res} км. Центр — ваша остання геолокація або точка з карти.`;
       await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : KEYBOARD });
     }
   } else if (text.startsWith("/code") || text.includes("код для карти")) {
