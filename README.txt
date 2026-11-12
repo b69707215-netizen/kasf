@@ -94,8 +94,24 @@ CLOUDFLARE (карта в інтернеті, без локального сер
 run.cmd     — запуск (подвійний клік)
 server.ps1  — локальний сервер+проксі (запускається run.cmd)
               адреса карти: http://127.0.0.1:8802/index.html
-index.html  — вся карта: код, канали, місця, ключові слова
+src/worker.js, wrangler.jsonc — те саме для Cloudflare
 README.txt  — ця інструкція
+
+public/ — сайт:
+  index.html       — тільки розмітка
+  css/app.css      — стилі
+  js/config.js     — налаштування, канали, ключові слова
+  js/places.js     — довідник міст, проксі й інтервали
+  js/map.js        — стан і створення карти
+  js/oblasts.js    — області, контури, маска України
+  js/network.js    — читання Telegram-каналів
+  js/ui.js         — звук і бічна панель
+  js/official.js   — офіційні тривоги (alerts.in.ua та запасні)
+  js/targets.js    — цілі dimap: типи, сліди, зона 15 хв, напрямок
+  js/raions.js     — тривоги по районах
+  js/app.js        — режими, права панель, запуск
+  places.json      — населені пункти (GeoNames)
+  ukraine.json     — межі областей і районів (OpenStreetMap)
 
 ЯК ДОДАТИ КАНАЛ / МІСЦЕ
 -----------------------

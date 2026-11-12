@@ -74,8 +74,13 @@ while ($listener.IsListening) {
         $res.Headers.Add("Cache-Control", "no-cache, no-store, must-revalidate")
         $res.Headers.Add("Pragma", "no-cache")
         $res.Headers.Add("Expires", "0")
-        if ($file -match "\.html$") { $res.ContentType = "text/html; charset=utf-8" }
-        else { $res.ContentType = "application/octet-stream" }
+        switch -Regex ($file) {
+          "\.html$" { $res.ContentType = "text/html; charset=utf-8" }
+          "\.js$"   { $res.ContentType = "application/javascript; charset=utf-8" }
+          "\.css$"  { $res.ContentType = "text/css; charset=utf-8" }
+          "\.json$" { $res.ContentType = "application/json; charset=utf-8" }
+          default   { $res.ContentType = "application/octet-stream" }
+        }
         $res.OutputStream.Write($bytes, 0, $bytes.Length)
       } else { $res.StatusCode = 404 }
     }

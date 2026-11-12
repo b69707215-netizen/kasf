@@ -1,0 +1,185 @@
+  :root {
+    --bg: #11151c;
+    --panel: #181d26;
+    --border: #2a3140;
+    --text: #d8dee9;
+    --muted: #8b93a5;
+    --red: #b02a2a;
+    --red-bright: #d43a3a;
+    --green: #2e7d4f;
+    --gray: #4a5568;
+    --yellow: #c9a227;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  #app { display: flex; height: 100vh; }
+
+  /* ---------- Sidebar ---------- */
+  #sidebar {
+    width: 340px; min-width: 280px; background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  #sidebar header { padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+  #sidebar h1 { font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  #sidebar h1 .flag { font-size: 20px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .official {
+    margin-top: 10px; font-size: 12px; line-height: 1.7;
+    border-top: 1px dashed var(--border); padding-top: 8px; color: var(--text);
+  }
+
+  .badges { display: flex; gap: 8px; margin: 12px 0 4px; flex-wrap: wrap; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #20262f; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 13px; font-weight: 600;
+  }
+  .badge.alert { color: #ff6b6b; border-color: #5a2530; }
+  .badge.clear { color: #e8c94f; border-color: #5a4b1a; }
+  .badge.nodata { color: var(--muted); }
+
+  .controls { display: flex; gap: 8px; margin-top: 10px; }
+  .controls button {
+    flex: 1; background: #232a35; color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 8px; font-size: 13px; cursor: pointer;
+  }
+  .controls button:hover { background: #2b3442; }
+  .controls button.on { border-color: #3d6e8f; color: #7cc7ff; }
+
+  #channels { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .ch {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+    background: #1c222c; transition: border-color .2s;
+  }
+  .ch:hover { border-color: #3d4658; }
+  .ch .row1 { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot.alert { background: var(--red-bright); box-shadow: 0 0 8px var(--red-bright); animation: pulse 1.2s infinite; }
+  .dot.clear { background: var(--green); }
+  .dot.nodata { background: var(--gray); }
+  .dot.loading { background: var(--yellow); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .4; } }
+  .ch .name { font-weight: 600; font-size: 14px; flex: 1; }
+  .ch .time { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  .ch .last { color: var(--muted); font-size: 12px; margin-top: 6px; max-height: 32px; overflow: hidden; }
+  .ch.alert-zone { border-color: #6b2530; background: #2a1a1e; }
+  .ch a { color: #6ab0f3; text-decoration: none; font-size: 11px; }
+  .ch a:hover { text-decoration: underline; }
+
+  #footer { padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); }
+  #footer a { color: #6ab0f3; }
+
+  /* ---------- Map ---------- */
+  #mapwrap { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; background: var(--bg); }
+  /* темний стиль для шару "Схема" (супутник не фільтруємо) */
+  .osm-dark .leaflet-tile {
+    filter: invert(1) hue-rotate(180deg) brightness(.82) contrast(1.12) saturate(.7);
+  }
+  #coords {
+    position: absolute; bottom: 34px; right: 10px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 10px; font-size: 12px;
+    font-family: Consolas, monospace; color: #7cc7ff;
+  }
+  #timestamp {
+    position: absolute; top: 10px; left: 10px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font-size: 13px;
+  }
+  #timestamp b { color: #7cc7ff; }
+  .target-marker {
+    background: none; border: none;
+    font-size: 24px; text-shadow: 0 0 8px #ff4040, 0 0 4px #000;
+    animation: pulse 1.2s infinite;
+  }
+  .sat-dark { filter: grayscale(1) brightness(.5) contrast(1.15); }
+  .plane-marker { background: none; border: none; transition: transform 4s linear; }
+  .leaflet-zoom-anim .plane-marker, .leaflet-dragging .plane-marker { transition: none; }
+  .track-label {
+    background: none; border: none;
+    color: #ffd9a0; font-size: 11px; font-weight: 600;
+    text-shadow: 0 0 4px #000, 0 0 4px #000; white-space: nowrap;
+    text-align: center;
+  }
+  .time-label {
+    background: rgba(0,0,0,.55); border: 1px solid #ffd280;
+    color: #ffd280; font-size: 10px; font-weight: 600;
+    border-radius: 4px; text-align: center; line-height: 13px;
+    white-space: nowrap;
+  }
+  .legend {
+    position: absolute; bottom: 14px; left: 14px; z-index: 1000;
+    background: rgba(24,29,38,.92); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; font-size: 12px; line-height: 1.9;
+  }
+  .lg { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin-right: 6px; vertical-align: -2px; }
+  .lg-red { background: #a91f1f; border: 1px solid #ff5a5a; }
+  .lg-yellow { background: #c9a227; border: 1px solid #e8c94f; }
+  .lg-clear { background: #1b2230; border: 1px solid #46506a; }
+  .threat-line { margin-top: 6px; min-height: 0; }
+  .threat-chip {
+    display: inline-block; background: #5a2530; color: #ffb0b0;
+    border-radius: 6px; padding: 2px 8px; font-size: 11px; font-weight: 600;
+  }
+  /* згортання бічної панелі + мобільна версія */
+  #btnSide {
+    position: absolute; top: 10px; right: 58px; z-index: 1000;
+    width: 34px; height: 34px; border-radius: 8px; cursor: pointer;
+    background: rgba(24,29,38,.92); color: var(--text); border: 1px solid var(--border); font-size: 17px;
+  }
+  #btnSide:hover { background: #2b3442; }
+  #btnSide { z-index: 1600; }
+  /* три режими: Карта / Тривоги / Цілі */
+  #modeBar {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 1000;
+    display: flex; gap: 4px; padding: 4px; background: rgba(24,29,38,.95);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45);
+  }
+  #modeBar button {
+    padding: 9px 16px; border: 0; border-radius: 9px; background: transparent;
+    color: var(--muted); font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  #modeBar button:hover { color: var(--text); background: #232a35; }
+  #modeBar button.on { background: #2b3a4d; color: #fff; }
+  /* права панель: що зараз у тривозі / що і куди летить */
+  #infoPanel {
+    position: absolute; top: 56px; right: 10px; z-index: 1000; width: 330px;
+    max-height: calc(100% - 150px); overflow-y: auto; display: none;
+    background: rgba(24,29,38,.96); border: 1px solid var(--border); border-radius: 12px;
+    padding: 10px 12px; font-size: 12.5px; line-height: 1.5; box-shadow: 0 4px 18px rgba(0,0,0,.45);
+  }
+  #infoPanel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 10px 0 6px; }
+  #infoPanel h3:first-child { margin-top: 0; }
+  .ip-row { border: 1px solid var(--border); border-radius: 9px; padding: 7px 9px; margin-bottom: 6px; background: #1c222c; cursor: pointer; }
+  .ip-row:hover { border-color: #3d4658; }
+  .ip-row .t { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .ip-row .sw { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .ip-row .m { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .ip-row .go { color: #9bd1ff; font-size: 11.5px; margin-top: 2px; }
+  .ip-note { color: var(--muted); font-size: 11.5px; }
+  .ip-chip { display: inline-block; border-radius: 6px; padding: 1px 7px; margin: 0 4px 4px 0; font-size: 11px; font-weight: 600; }
+  @media (max-width: 800px) {
+    #infoPanel { top: auto; bottom: 76px; right: 8px; left: 8px; width: auto; max-height: 40%; }
+    #modeBar button { padding: 9px 11px; font-size: 12px; }
+  }
+  #sidebar.collapsed { display: none; }
+  /* режим «тільки карта»: прибираємо зайві плашки */
+  #officialMini, #coords { display: none !important; }
+  .legend { font-size: 11.5px !important; line-height: 1.7 !important; padding: 7px 11px !important; bottom: 22px !important; }
+  .legend .lt { display: inline-block; width: 11px; height: 11px; transform: rotate(0deg); clip-path: polygon(50% 0, 100% 100%, 50% 80%, 0 100%); margin-right: 6px; vertical-align: -1px; }
+  #timestamp { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 140px); }
+  #timestamp .chip { white-space: nowrap; }
+  @media (max-width: 800px) {
+    #sidebar { position: absolute; inset: 0; width: 100%; z-index: 2000; }
+    #timestamp { font-size: 11px; padding: 4px 8px; }
+    #officialMini { display: none; }
+    .legend { font-size: 10.5px !important; bottom: 76px !important; }
+  }
+  .err-banner {
+    position: absolute; bottom: 74px; left: 50%; transform: translateX(-50%);
+    z-index: 1000; background: #5a2530; color: #ffd7d7; border-radius: 8px;
+    padding: 6px 14px; font-size: 12px; display: none;
+  }
