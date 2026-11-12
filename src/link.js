@@ -25,7 +25,7 @@ export async function issueCode(env, chat) {
 }
 
 const okRadius = b => b && Number.isFinite(b.lat) && Number.isFinite(b.lng) && Math.abs(b.lat) <= 90 && Math.abs(b.lng) <= 180
-  && Number.isFinite(b.km) && b.km >= 5 && b.km <= 100;
+  && Number.isFinite(b.km) && b.km >= 5 && b.km <= 150;
 
 /* Карта → POST /link { code, lat, lng, km } → { token } */
 export async function linkFromMap(request, env) {
@@ -57,6 +57,16 @@ export async function syncFromMap(request, env) {
   const moved = u.lat !== b.lat || u.lng !== b.lng || u.km !== Math.round(b.km);
   await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat: b.lat, lng: b.lng, km: Math.round(b.km), ids: moved ? [] : u.ids }));
   return json({ ok: true });
+}
+
+/* Бот: змінити радіус (5–150 км) для вже підключеного чату. Повертає км, "nolink" або "range". */
+export async function setRadiusFromBot(env, chat, km) {
+  if (!env.STATE) return "nolink";
+  if (!Number.isFinite(km) || km < 5 || km > 150) return "range";
+  const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null");
+  if (!u) return "nolink";
+  await env.STATE.put("u:" + chat, JSON.stringify({ ...u, km: Math.round(km), ids: [] }));
+  return Math.round(km);
 }
 
 export async function unlink(env, chat) {

@@ -1,8 +1,8 @@
 "use strict";
-/* ==================== Радіус: чи є цілі навколо мене (до 100 км) ====================
-   📍 — відкриває панель: центр беремо з геолокації (або тапом по карті), радіус 5–100 км.
+/* ==================== Радіус: чи є цілі навколо мене (до 150 км) ====================
+   📍 — відкриває панель: центр беремо з геолокації (або тапом по карті), радіус 5–150 км.
    Статус оновлюється разом із даними цілей (updateRadius викликається з targets.js). */
-const RADIUS_MAX_KM = 100, RADIUS_MIN_KM = 5;
+const RADIUS_MAX_KM = 150, RADIUS_MIN_KM = 5;
 const radiusState = { on: false, center: null, km: 20, picking: false, where: "" };
 try { Object.assign(radiusState, JSON.parse(localStorage.getItem("radius") || "{}"), { on: false, picking: false }); } catch (e) {}
 radiusState.km = Math.min(RADIUS_MAX_KM, Math.max(RADIUS_MIN_KM, +radiusState.km || 20));
@@ -131,20 +131,28 @@ async function botPost(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
 }
-let botSyncTimer = null;
-function syncBot() {   // викликається після кожної зміни центра/радіуса
-  if (!botToken || !radiusState.center) return;
-  clearTimeout(botSyncTimer);
-  botSyncTimer = setTimeout(async () => {
-    try {
-      const r = await botPost("/link/sync", { token: botToken, lat: radiusState.center[0], lng: radiusState.center[1], km: radiusState.km });
-      if (r.status === 404) { botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {} showBotState(); botMsg("Підключення втрачено — введіть новий код."); }
-      else if (r.ok) botMsg("Радіус збережено для бота ✓");
-    } catch (e) { botMsg("Немає зв'язку з сервером — радіус для бота не оновлено."); }
-  }, 800);
+/* Після підключення зміни НЕ йдуть у бота самі: з'являється кнопка «Підтвердити радіус». */
+let botSent = null;   // що вже збережено для бота: "lat,lng,km"
+try { botSent = localStorage.getItem("botSent"); } catch (e) {}
+const radiusKey = () => radiusState.center ? `${radiusState.center[0]},${radiusState.center[1]},${radiusState.km}` : "";
+function refreshBotBtn() {
+  const btn = document.getElementById("botConfirm");
+  btn.style.display = botToken && radiusState.center && radiusKey() !== botSent ? "block" : "none";
+  if (btn.style.display === "block") botMsg("Радіус змінено, але бот про це ще не знає.");
 }
+function setBotSent() { botSent = radiusKey(); try { localStorage.setItem("botSent", botSent); } catch (e) {} refreshBotBtn(); }
 const _saveRadius = saveRadius;
-saveRadius = function () { _saveRadius(); syncBot(); };
+saveRadius = function () { _saveRadius(); refreshBotBtn(); };
+document.getElementById("botConfirm").onclick = async () => {
+  if (!botToken || !radiusState.center) return;
+  botMsg("Зберігаю…");
+  try {
+    const r = await botPost("/link/sync", { token: botToken, lat: radiusState.center[0], lng: radiusState.center[1], km: radiusState.km });
+    if (r.status === 404) { botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {} showBotState(); botMsg("Підключення втрачено — введіть новий код."); }
+    else if (r.ok) { setBotSent(); botMsg("Радіус підтверджено — бот використовує його ✓"); }
+    else botMsg("Не вдалося зберегти.");
+  } catch (e) { botMsg("Немає зв'язку з сервером."); }
+};
 
 document.getElementById("botLink").onclick = async () => {
   const code = document.getElementById("botCode").value.trim();
@@ -155,13 +163,13 @@ document.getElementById("botLink").onclick = async () => {
     const r = await botPost("/link", { code, lat: radiusState.center[0], lng: radiusState.center[1], km: radiusState.km });
     if (r.ok && r.data.token) {
       botToken = r.data.token; try { localStorage.setItem("botToken", botToken); } catch (e) {}
-      document.getElementById("botCode").value = ""; showBotState(); botMsg("Готово — бот надіслав підтвердження в Telegram.");
+      document.getElementById("botCode").value = ""; showBotState(); setBotSent(); botMsg("Готово — бот надіслав підтвердження в Telegram.");
     } else botMsg(r.status === 404 ? "Код невірний або застарів. Натисніть кнопку в боті ще раз." : "Не вдалося підключити.");
   } catch (e) { botMsg("Немає зв'язку з сервером."); }
 };
 document.getElementById("botUnlink").onclick = async () => {
   try { await botPost("/link/sync", { token: botToken, unlink: true }); } catch (e) {}
   botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {}
-  showBotState(); botMsg("");
+  showBotState(); botMsg(""); refreshBotBtn();
 };
-showBotState();
+showBotState(); refreshBotBtn();
