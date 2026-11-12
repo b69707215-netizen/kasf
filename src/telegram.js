@@ -2,6 +2,8 @@
 // Telegram надсилає повідомлення користувачів на webhook цього Worker (POST /tg).
 // Підписники зберігаються в KV (ключ "subs"); сповіщення про цілі йдуть усім підписникам.
 
+import { issueCode, unlink } from "./link.js";
+
 export async function tgApi(env, method, body) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
@@ -17,7 +19,8 @@ export async function getSubs(env) {
 async function setSubs(env, arr) { if (env.STATE) await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); }
 
 const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
-  "і напишу «відбій», коли небезпека мине.\n\nЩоб відписатися — /stop";
+  "і напишу «відбій», коли небезпека мине.\n\nЩоб отримувати сповіщення про свій радіус з карти — натисніть «🔗 Код для карти».\n\nЩоб відписатися — /stop";
+const KEYBOARD = { keyboard: [[{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
 const BYE = "Добре, більше не надсилатиму. Щоб повернутись — /start";
 
 /* Вхідні повідомлення від Telegram (webhook) */
@@ -34,8 +37,14 @@ export async function handleWebhook(request, env) {
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
     if (!subs.includes(chat)) await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
-    await tgApi(env, "sendMessage", { chat_id: chat, text: HELLO });
+    await tgApi(env, "sendMessage", { chat_id: chat, text: HELLO, reply_markup: KEYBOARD });
+  } else if (text.startsWith("/code") || text.includes("код для карти")) {
+    const code = await issueCode(env, chat);
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: code
+      ? `Ваш код: ${code}\n\nВідкрийте карту → 📍 Радіус → «Підключити бота» і введіть цей код (діє 10 хвилин). Після цього бот сповіщатиме про цілі саме у вашому радіусі.`
+      : "Сховище недоступне, спробуйте пізніше." });
   } else if (text.startsWith("/stop")) {
+    await unlink(env, chat);
     await setSubs(env, (await getSubs(env)).filter(c => c !== chat));
     await tgApi(env, "sendMessage", { chat_id: chat, text: BYE });
   }

@@ -5,7 +5,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/proxy", "/alerts", "/tg", "/tg/*"]
+    "run_worker_first": ["/proxy", "/alerts", "/tg", "/tg/*", "/link", "/link/*"]
   },
   // Telegram-бот: щохвилини запуск, у ньому 2 перевірки з паузою 30 с (радіус 20 км від Павлограда)
   "triggers": { "crons": ["* * * * *"] },

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Карта тривог України у реальному часі (з Telegram)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="css/app.css?v=3">
+<link rel="stylesheet" href="css/app.css?v=4">
 <script>
 /* Сайт складається з окремих файлів (css/, js/), тому його не можна відкривати просто як файл — лише через сервер. */
 if (!/^https?:$/.test(location.protocol)) {
@@ -53,6 +53,11 @@ if (!/^https?:$/.test(location.protocol)) {
       <div class="rp-head"><b>📍 Радіус перевірки</b><button id="radiusClose" title="Закрити">✕</button></div>
       <div class="rp-range"><input type="range" id="radiusKm" min="5" max="100" step="5" value="20"><span id="radiusKmLabel">20 км</span></div>
       <div class="rp-btns"><button id="radiusMe">Моє місце</button><button id="radiusPick">На карті</button></div>
+      <div id="radiusBot">
+        <div id="botLinked" style="display:none"><span>🤖 Бот підключено</span><button id="botUnlink">Відключити</button></div>
+        <div id="botForm"><input id="botCode" maxlength="6" placeholder="Код з бота" autocomplete="off" autocapitalize="characters"><button id="botLink">🤖 Підключити бота</button></div>
+        <div id="botMsg"></div>
+      </div>
       <div id="radiusStatus"></div>
     </div>
     <div id="modeBar">
@@ -76,7 +81,7 @@ if (!/^https?:$/.test(location.protocol)) {
 <script src="js/official.js?v=1"></script>
 <script src="js/targets.js?v=1"></script>
 <script src="js/raions.js?v=1"></script>
-<script src="js/radius.js?v=2"></script>
+<script src="js/radius.js?v=3"></script>
 <script src="js/app.js?v=1"></script>
 </body>
 </html>

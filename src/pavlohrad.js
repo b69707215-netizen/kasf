@@ -2,6 +2,7 @@
 // Дані — dimap.live (з дозволу авторів). Cloudflare Cron запускає це щохвилини, а всередині
 // кожного запуску — дві перевірки з паузою 30 с, тож про нову ціль повідомляємо за ≤30 с.
 import { getSubs } from "./telegram.js";
+import { listUsers, saveUser } from "./link.js";
 export const CENTER = { lat: 48.52, lng: 35.87, name: "Павлоград" };
 export const RADIUS_KM = 20;
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
@@ -31,22 +32,22 @@ const LABEL = {
 const label = type => LABEL[type] || (/missile|rocket|cruise|ballistic/i.test(type || "") ? LABEL.missile : /kab|glide/i.test(type || "") ? LABEL.kab : "🎯 Ціль");
 
 /* Цілі в радіусі + чи летить ціль у бік міста (курс у межах ±35°) і за скільки хвилин долетить */
-export function nearTargets(targets, now = Date.now()) {
+export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RADIUS_KM) {
   const out = [];
   for (const t of targets || []) {
     if (!Number.isFinite(t.lat) || !Number.isFinite(t.lng)) continue;
     const seen = Date.parse(t.lastSeen);
     if (seen && now - seen > STALE_MS) continue;
-    const d = distKm(CENTER.lat, CENTER.lng, t.lat, t.lng);
-    if (d > RADIUS_KM) continue;
-    const brgToCity = bearingDeg(t.lat, t.lng, CENTER.lat, CENTER.lng);
+    const d = distKm(c.lat, c.lng, t.lat, t.lng);
+    if (d > radiusKm) continue;
+    const brgToCity = bearingDeg(t.lat, t.lng, c.lat, c.lng);
     const diff = Math.abs(((brgToCity - (t.bearing || 0) + 540) % 360) - 180);
     const speed = t.speed || 0;
     const toward = speed > 20 && diff <= 35;
     out.push({
       id: String(t.id), type: t.type, km: d, toward,
       etaMin: toward ? Math.max(1, Math.round(d / speed * 60)) : null,
-      from: side(bearingDeg(CENTER.lat, CENTER.lng, t.lat, t.lng)),
+      from: side(bearingDeg(c.lat, c.lng, t.lat, t.lng)),
       course: Math.round(t.bearing || 0), speed: Math.round(speed)
     });
   }
@@ -60,6 +61,35 @@ export function alertText(list) {
   return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${RADIUS_KM} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: dimap.live`;
 }
 export const clearText = () => `✅ ВІДБІЙ. В радіусі ${RADIUS_KM} км від ${CENTER.name}а цілей більше немає.`;
+
+/* Текст для користувача з прив'язаної карти (радіус довкола його точки) */
+export function userAlertText(list, km) {
+  const lines = list.map(t =>
+    `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від вас\n   курс ${t.course}°, ${t.speed} км/год` +
+    (t.toward ? `\n   ➜ летить на вас, ~${t.etaMin} хв` : "\n   не прямо на вас (за курсом)"));
+  return `⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: dimap.live`;
+}
+
+async function sendOne(env, chat_id, text) {
+  const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id, text, disable_web_page_preview: true })
+  });
+  if (!r.ok) console.log("telegram send failed", chat_id, r.status);
+}
+
+/* Радіуси користувачів з карти: нова ціль → повідомлення, порожньо → відбій */
+async function passUsers(env, users, targets) {
+  for (const u of users) {
+    const list = nearTargets(targets, Date.now(), { lat: u.lat, lng: u.lng }, u.km);
+    const ids = list.map(t => t.id), prev = u.ids || [];
+    let msg = null;
+    if (ids.some(id => !prev.includes(id))) msg = userAlertText(list, u.km);
+    else if (!list.length && prev.length) msg = `✅ ВІДБІЙ. У вашому радіусі ${u.km} км цілей більше немає.`;
+    if (msg) await sendOne(env, u.chat, msg);
+    if (ids.join() !== prev.join()) { u.ids = ids; await saveUser(env, u); }
+  }
+}
 
 async function sendTelegram(env, text) {
   // одержувачі: ті, хто натиснув /start (KV), + необов'язковий список CHAT_IDS
@@ -76,11 +106,12 @@ async function sendTelegram(env, text) {
 
 /* Одна перевірка. st = { ids: [...id цілей, про які вже повідомили] }.
    Нова ціль у радіусі → повідомлення про всі поточні. Радіус спорожнів → одразу «відбій». */
-async function pass(env, st) {
+async function pass(env, st, users) {
   const r = await fetch("https://api.dimap.live/api/targets", { headers: { "User-Agent": "radf4-pavlohrad-bot" } });
   if (!r.ok) { console.log("dimap http", r.status); return st; }   // джерело недоступне — нічого не вирішуємо
   const data = await r.json();
   if (!Array.isArray(data.targets)) return st;
+  await passUsers(env, users, data.targets).catch(e => console.log("users pass error", e && e.message));
   const list = nearTargets(data.targets);
   const ids = list.map(t => t.id);
   if (ids.some(id => !st.ids.includes(id))) {
@@ -104,10 +135,11 @@ export async function run(env) {
   let st;
   try { st = JSON.parse((await env.STATE.get("pavlohrad")) || '{"ids":[]}'); } catch { st = { ids: [] }; }
   if (!Array.isArray(st.ids)) st = { ids: [] };
+  const users = await listUsers(env).catch(() => []);
   for (let i = 0; i < PASSES; i++) {
     if (i) await sleep(PASS_EVERY_MS);
     try {
-      st = await pass(env, st);
+      st = await pass(env, st, users);
       await env.STATE.put("pavlohrad", JSON.stringify(st));
     } catch (e) { console.log("bot pass error", e && e.message); }
   }

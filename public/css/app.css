@@ -233,3 +233,15 @@
   /* прибрано за запитом: кнопка панелі ☰ та перемикач шарів */
   #btnSide, .leaflet-control-layers, .leaflet-control-zoom { display: none !important; }
   #btnRadius { right: 10px !important; }
+
+  /* підключення бота до радіуса */
+  #radiusBot { margin-bottom: 8px; }
+  #botForm, #botLinked { display: flex; gap: 8px; align-items: center; }
+  #botLinked { justify-content: space-between; color: #63d68f; font-weight: 600; }
+  #botCode { width: 92px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border); background: #1c222c; color: var(--text);
+    font-size: 14px; letter-spacing: 2px; text-transform: uppercase; text-align: center; }
+  #botForm button, #botLinked button { flex: 1; padding: 7px 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px;
+    background: #232a35; color: var(--text); border: 1px solid var(--border); }
+  #botLinked button { flex: 0 0 auto; }
+  #botMsg { font-size: 11.5px; margin-top: 4px; color: var(--muted); }
+  #botMsg:empty { display: none; }

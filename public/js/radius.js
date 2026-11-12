@@ -117,3 +117,51 @@ document.getElementById("radiusStatus").onclick = e => {   // клік по ці
   const row = e.target.closest(".rs-row"); if (!row) return;
   const m = dimapMarkers.get(row.dataset.id); if (m) { map.setView(m.marker.getLatLng(), Math.max(map.getZoom(), 9)); m.marker.openPopup(); }
 };
+
+/* ==================== Зв'язок з Telegram-ботом ====================
+   Код із бота («🔗 Код для карти») вводимо тут → радіус зберігається на сервері, бот пише про цілі в ньому.
+   Після підключення зміни центра/радіуса самі відправляються на сервер. */
+let botToken = ""; try { botToken = localStorage.getItem("botToken") || ""; } catch (e) {}
+const botMsg = t => { document.getElementById("botMsg").textContent = t || ""; };
+function showBotState() {
+  document.getElementById("botLinked").style.display = botToken ? "flex" : "none";
+  document.getElementById("botForm").style.display = botToken ? "none" : "flex";
+}
+async function botPost(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+}
+let botSyncTimer = null;
+function syncBot() {   // викликається після кожної зміни центра/радіуса
+  if (!botToken || !radiusState.center) return;
+  clearTimeout(botSyncTimer);
+  botSyncTimer = setTimeout(async () => {
+    try {
+      const r = await botPost("/link/sync", { token: botToken, lat: radiusState.center[0], lng: radiusState.center[1], km: radiusState.km });
+      if (r.status === 404) { botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {} showBotState(); botMsg("Підключення втрачено — введіть новий код."); }
+      else if (r.ok) botMsg("Радіус збережено для бота ✓");
+    } catch (e) { botMsg("Немає зв'язку з сервером — радіус для бота не оновлено."); }
+  }, 800);
+}
+const _saveRadius = saveRadius;
+saveRadius = function () { _saveRadius(); syncBot(); };
+
+document.getElementById("botLink").onclick = async () => {
+  const code = document.getElementById("botCode").value.trim();
+  if (code.length < 6) { botMsg("Введіть 6 символів коду з бота."); return; }
+  if (!radiusState.center) { botMsg("Спершу оберіть центр: «Моє місце» або «На карті»."); return; }
+  botMsg("Підключаю…");
+  try {
+    const r = await botPost("/link", { code, lat: radiusState.center[0], lng: radiusState.center[1], km: radiusState.km });
+    if (r.ok && r.data.token) {
+      botToken = r.data.token; try { localStorage.setItem("botToken", botToken); } catch (e) {}
+      document.getElementById("botCode").value = ""; showBotState(); botMsg("Готово — бот надіслав підтвердження в Telegram.");
+    } else botMsg(r.status === 404 ? "Код невірний або застарів. Натисніть кнопку в боті ще раз." : "Не вдалося підключити.");
+  } catch (e) { botMsg("Немає зв'язку з сервером."); }
+};
+document.getElementById("botUnlink").onclick = async () => {
+  try { await botPost("/link/sync", { token: botToken, unlink: true }); } catch (e) {}
+  botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {}
+  showBotState(); botMsg("");
+};
+showBotState();

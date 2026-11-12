@@ -2,6 +2,7 @@
 //   /proxy?url=...  — читає лише дозволені сайти (Telegram, dimap, джерела тривог)
 //   /alerts         — офіційне API alerts.in.ua (токен у секреті ALERTS_TOKEN)
 import { run as runBot } from "./pavlohrad.js";
+import { linkFromMap, syncFromMap } from "./link.js";
 import { handleWebhook, setupWebhook } from "./telegram.js";
 const ALLOWED = new Set(["t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live"]);
 
@@ -52,6 +53,8 @@ export default {
     if (request.method === "GET" && pathname === "/proxy") return proxy(request);
     if (request.method === "GET" && pathname === "/alerts") return alerts(env);
     if (request.method === "POST" && pathname === "/tg") return handleWebhook(request, env);   // повідомлення від Telegram
+    if (request.method === "POST" && pathname === "/link") return linkFromMap(request, env);       // карта ↔ бот: код з бота
+    if (request.method === "POST" && pathname === "/link/sync") return syncFromMap(request, env);   // оновити / відв'язати радіус
     if (request.method === "GET" && pathname === "/tg/setup") return setupWebhook(request, env);   // одноразове підключення бота
     return env.ASSETS.fetch(request);   // решта — статичні файли карти
   },
