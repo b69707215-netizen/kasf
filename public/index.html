@@ -140,7 +140,12 @@
   #btnSide:hover { background: #2b3442; }
   #sidebar.collapsed { display: none; }
   /* режим «тільки карта»: прибираємо зайві плашки */
-  #officialMini, .legend, #coords { display: none !important; }
+  #officialMini, #coords { display: none !important; }
+  .legend { font-size: 11.5px !important; line-height: 1.7 !important; padding: 7px 11px !important; bottom: 22px !important; }
+  .legend .lt { display: inline-block; width: 11px; height: 11px; transform: rotate(0deg); clip-path: polygon(50% 0, 100% 100%, 50% 80%, 0 100%); margin-right: 6px; vertical-align: -1px; }
+  #timestamp { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; max-width: calc(100% - 140px); }
+  #timestamp .chip { white-space: nowrap; }
+  @media (max-width: 800px) { .legend { display: block !important; font-size: 10.5px !important; } }
   @media (max-width: 800px) {
     #sidebar { position: absolute; inset: 0; width: 100%; z-index: 2000; }
     #timestamp { font-size: 11px; padding: 4px 8px; }
@@ -159,11 +164,11 @@
   <aside id="sidebar">
     <header>
       <h1><span class="flag">🇺🇦</span> Карта тривог України</h1>
-      <div class="sub">Telegram-канали + офіційні тривоги · оновлення кожні 30 сек</div>
+      <div class="sub">Цілі та тривоги: dimap.live + офіційні джерела + Telegram-канали</div>
       <div class="badges">
         <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
-        <span class="badge clear" id="bClear">🟢 Спокій: 0</span>
-        <span class="badge nodata" id="bNoData">⚪ Немає даних: 0</span>
+        <span class="badge clear" id="bClear">🟡 Райони: 0</span>
+        <span class="badge nodata" id="bNoData">🎯 Цілей: 0</span>
       </div>
       <div class="badges" id="threatCounts"></div>
       <div class="controls">
@@ -175,8 +180,8 @@
     </header>
     <div id="channels"></div>
     <div id="footer">
-      Джерела — публічні пости каналів через <a href="https://t.me" target="_blank">t.me/s/</a>.
-      Приватні канали (за запрошенням) прочитати не можна.
+      Цілі й тривоги по районах — <a href="https://dimap.live/" target="_blank" rel="noopener">dimap.live</a> (з дозволу авторів).
+      Канали — публічні пости через <a href="https://t.me" target="_blank">t.me/s/</a>. Напрямок цілі — оцінка за курсом, не прогноз.
     </div>
   </aside>
   <main id="mapwrap">
@@ -187,9 +192,11 @@
     <div id="coords">📍 48.0000, 36.0000</div>
     <div class="legend">
       <div><span class="lg lg-red"></span> Тривога</div>
-      <div><span class="lg lg-yellow"></span> Загроза: шахеди / КАБи / ракети</div>
-      <div><span class="lg lg-clear"></span> Тривоги немає</div>
-      <div><span class="lg" style="background:#ff7b00;opacity:.35"></span> Конус КАБів (кільця: хвилини до падіння)</div>
+      <div><span class="lg lg-yellow"></span> Загроза</div>
+      <div><span class="lt" style="background:#ff9b3d"></span> Шахед / дрон</div>
+      <div><span class="lt" style="background:#ff4040"></span> Реактивний / ракета</div>
+      <div><span class="lt" style="background:#8ec8ff"></span> Авіація</div>
+      <div style="color:#8b93a5">╌╌▸ можливий напрямок (15 хв)</div>
     </div>
     <div class="err-banner" id="errBanner"></div>
   </main>
@@ -198,6 +205,9 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 "use strict";
+/* Telegram-канали лишаються: показують стан по своїх громадах і фарбують області.
+   Точки цілей на карті беруться лише з dimap (SHOW_TG_TARGETS = false), щоб не було здогадок із постів. */
+const USE_TELEGRAM = true;
 
 /* =========================================================
    НАЛАШТУВАННЯ — можна редагувати прямо в цьому файлі
@@ -433,6 +443,8 @@ CHANNELS.forEach(c => state[c.id] = { status: "loading", state: "nodata", msgs: 
 
 /* ==================== Карта ==================== */
 const map = L.map("map", {
+  preferCanvas: true,   // полігони областей/районів малюємо на canvas — швидше за SVG
+  zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
   zoomControl: true,
   maxBounds: [[43.0, 20.0], [53.5, 42.0]],   // вся Україна з запасом
   maxBoundsViscosity: 0.8,
@@ -587,7 +599,7 @@ function fitUkraine() {
   if (s.x < 50 || s.y < 50) { setTimeout(fitUkraine, 200); return; }   // вікно ще не отримало розмір
   map.setMinZoom(0);
   map.fitBounds(ukrBounds, { padding: [8, 8] });
-  map.setMinZoom(Math.floor(map.getZoom()));
+  map.setMinZoom(map.getZoom());
 }
 window.addEventListener("resize", () => { clearTimeout(fitUkraine._t); fitUkraine._t = setTimeout(fitUkraine, 150); });
 
@@ -715,7 +727,8 @@ function planeIcon(type, deg) {
     : "M12 2 L21 21 L12 17 L3 21 Z";                                                                             // дрон/ракета
   return L.divIcon({
     className: "plane-marker",
-    html: `<svg width="28" height="28" viewBox="0 0 24 24" style="transform:rotate(${deg}deg);filter:drop-shadow(0 0 4px #000)">` +
+    html: `<svg width="28" height="28" viewBox="0 0 24 24" style="transform:rotate(${deg}deg);filter:drop-shadow(0 0 5px ${color})">` +
+          `<circle cx="12" cy="12" r="11" fill="${color}" opacity=".14"/>` +
           `<path d="${shape}" fill="${color}" stroke="#000" stroke-width="1"/></svg>`,
     iconSize: [28, 28], iconAnchor: [14, 14]
   });
@@ -1222,12 +1235,30 @@ function dimapKind(type) {
   if (/kab|glide/i.test(type)) return "kab";
   return "drone";
 }
+const KIND_COLOR = { missile: "#ff4040", kab: "#ffd24a", aviation: "#8ec8ff", drone: "#ff9b3d" };
+const RAY_MIN = 15;   // на скільки хвилин уперед показуємо можливий напрямок
+
+/* Можливі цілі: населені пункти, що лежать на курсі цілі (±12°) і досяжні за ~45 хв.
+   Це оцінка за поточним курсом і швидкістю, а не прогноз. */
+function possibleTargets(lat, lng, bearing, speedKmh) {
+  if (!(speedKmh > 20)) return [];
+  const from = [lat, lng], maxKm = speedKmh * 0.75, out = [];
+  for (const p of PLACES) {
+    const dKm = map.distance(from, p.ll) / 1000;
+    if (dKm < 3 || dKm > maxKm) continue;
+    const diff = Math.abs(((bearingTo(from, p.ll) - bearing + 540) % 360) - 180);
+    if (diff <= 12) out.push({ name: p.name, km: dKm, min: dKm / speedKmh * 60 });
+  }
+  return out.sort((a, b) => a.km - b.km).slice(0, 3);
+}
+
 async function refreshDimapTargets() {
   if (document.hidden) return;
   const raw = await fetchViaProxy("https://api.dimap.live/api/targets", t => t.trim().startsWith("{"));
   if (!raw) return;
   let j; try { j = JSON.parse(raw); } catch (e) { return; }
   if (!Array.isArray(j.targets)) return;
+  dimapLastOk = Date.now();
   const maxAge = 3 * 60000;   // ціль без оновлень понад 3 хв не показуємо
   const alive = new Set();
   j.targets.forEach(t => {
@@ -1238,10 +1269,14 @@ async function refreshDimapTargets() {
     alive.add(id);
     const kind = dimapKind(t.type || "");
     const label = DIMAP_TYPES[t.type] || t.type || "Ціль";
+    const poss = possibleTargets(t.lat, t.lng, t.bearing || 0, t.speed || 0);
     const html = `<b>${escapeHtml(label)}</b><br>курс ${Math.round(t.bearing || 0)}° · ${Math.round(t.speed || 0)} км/год` +
       `<br>📍 ${t.lat.toFixed(3)}, ${t.lng.toFixed(3)}` +
       (seenAt ? `<br><span style="color:#6ab0f3">${fmtTime(seenAt)}</span>` : "") +
-      `<hr><span style="color:#8b93a5">джерело: dimap.live</span>`;
+      (poss.length
+        ? `<hr><b>Можливий напрямок:</b><br>` + poss.map(p => `➜ ${escapeHtml(p.name)} · ~${Math.round(p.km)} км · ~${Math.max(1, Math.round(p.min))} хв`).join("<br>")
+        : `<hr><span style="color:#8b93a5">населених пунктів на курсі поблизу немає</span>`) +
+      `<hr><span style="color:#8b93a5">джерело: dimap.live · оцінка за курсом</span>`;
     let e = dimapMarkers.get(id);
     if (e) {   // та сама ціль — просто пересуваємо й повертаємо (плавно, без миготіння)
       e.marker.setLatLng([t.lat, t.lng]);
@@ -1253,6 +1288,16 @@ async function refreshDimapTargets() {
       e = { marker, kind, brg: t.bearing, trail: null };
       dimapMarkers.set(id, e);
     }
+    // можливий напрямок: пунктир уперед на RAY_MIN хвилин за поточним курсом і швидкістю
+    if ((t.speed || 0) > 20) {
+      const endLL = destination([t.lat, t.lng], t.bearing || 0, (t.speed * 1000 / 60) * RAY_MIN);
+      const col = KIND_COLOR[kind];
+      if (e.ray) { e.ray.setLatLngs([[t.lat, t.lng], endLL]); e.rayEnd.setLatLng(endLL); }
+      else {
+        e.ray = L.polyline([[t.lat, t.lng], endLL], { color: col, weight: 2, opacity: 0.85, dashArray: "2 7", interactive: false }).addTo(dimapGroup);
+        e.rayEnd = L.circleMarker(endLL, { radius: 3, color: col, weight: 1, fillColor: col, fillOpacity: 0.9, interactive: false }).addTo(dimapGroup);
+      }
+    } else if (e.ray) { dimapGroup.removeLayer(e.ray); dimapGroup.removeLayer(e.rayEnd); e.ray = e.rayEnd = null; }
     // слід руху
     const pts = Array.isArray(t.history) ? t.history.map(p => Array.isArray(p) ? [p[0], p[1]] : (p && Number.isFinite(p.lat) ? [p.lat, p.lng] : null)).filter(Boolean) : [];
     if (pts.length > 1) {
@@ -1265,6 +1310,7 @@ async function refreshDimapTargets() {
     if (alive.has(id)) continue;
     dimapGroup.removeLayer(e.marker);
     if (e.trail) dimapGroup.removeLayer(e.trail);
+    if (e.ray) { dimapGroup.removeLayer(e.ray); dimapGroup.removeLayer(e.rayEnd); }
     dimapMarkers.delete(id);
   }
   dimapCount = alive.size;
@@ -1341,6 +1387,8 @@ async function refreshRaions() {
   try { rows = JSON.parse(raw); } catch (e) { box.innerHTML = "⚠ Тривоги по районах: помилка даних"; return; }
   const air = rows.filter(r => r.alertType === "air" && (r.color === "red" || r.color === "yellow"));   // порожній колір = тривоги немає
   const red = air.filter(r => r.color === "red"), yellow = air.filter(r => r.color === "yellow");
+  raionStats = { red: red.length, yellow: yellow.length };
+  raionLastOk = Date.now();
   const chip = (r, c) => `<span class="threat-chip" style="background:${c === "red" ? "#5a2530" : "#4d4216"};color:${c === "red" ? "#ffb0b0" : "#f1dc8a"};margin:2px 2px 0 0">${escapeHtml(r.region.replace(" район", " р-н"))}</span>`;
   drawRaions(air);
   const mine = air.filter(r => HOME_RAIONS.has(r.region));
@@ -1350,9 +1398,20 @@ async function refreshRaions() {
 }
 
 /* ==================== Запуск ==================== */
+let raionStats = { red: 0, yellow: 0 }, dimapLastOk = 0, raionLastOk = 0;
+/* верхня плашка на карті: час і головні цифри — видно навіть коли панель згорнута.
+   Якщо dimap не відповідає — пишемо про це, а не показуємо оманливі нулі. */
 function updateTimestamp() {
-  $("timestamp").innerHTML = "Станом на <b>" +
-    new Date().toLocaleTimeString("uk-UA") + "</b>";
+  const redObl = OBLASTS.filter(o => oblastState[o.key] === "alert").length;
+  const stale = t => !t || Date.now() - t > 60000;
+  const warn = `<span class="chip" style="color:#ffb86b" title="Дані dimap.live не завантажуються: запустіть run.cmd (локально) або перевірте, що працює /proxy (Cloudflare)">⚠ немає зв'язку з dimap</span>`;
+  $("timestamp").innerHTML =
+    `<span class="chip">Станом на <b>${new Date().toLocaleTimeString("uk-UA")}</b></span>` +
+    `<span class="chip">🔴 областей: <b>${redObl}</b></span>` +
+    (stale(raionLastOk) && stale(dimapLastOk)
+      ? warn
+      : `<span class="chip">🟥 районів: <b>${stale(raionLastOk) ? "?" : raionStats.red}</b>${!stale(raionLastOk) && raionStats.yellow ? ` · 🟡 ${raionStats.yellow}` : ""}</span>` +
+        `<span class="chip">🎯 цілей: <b>${stale(dimapLastOk) ? "?" : dimapCount}</b></span>`);
 }
 
 async function refreshAll() {
