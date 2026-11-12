@@ -126,6 +126,7 @@ const botMsg = t => { document.getElementById("botMsg").textContent = t || ""; }
 function showBotState() {
   document.getElementById("botLinked").style.display = botToken ? "flex" : "none";
   document.getElementById("botForm").style.display = botToken ? "none" : "flex";
+  document.getElementById("botFollowRow").style.display = botToken ? "block" : "none";
 }
 async function botPost(path, body) {
   const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -173,3 +174,45 @@ document.getElementById("botUnlink").onclick = async () => {
   showBotState(); botMsg(""); refreshBotBtn();
 };
 showBotState(); refreshBotBtn();
+
+/* ==================== Постійна геолокація (поки сайт відкритий) ====================
+   Браузер не віддає геолокацію у фоні, тож це працює, доки вкладка відкрита (екран увімкнений).
+   Центр на сервері оновлюється кожні ≥20 с, якщо ви змістились понад 100 м; радіус — той, що підтверджено. */
+let followId = null, followLast = null, followSentAt = 0, wakeLock = null;
+const followBox = document.getElementById("botFollow");
+const confirmedKm = () => { const k = +String(botSent || "").split(",")[2]; return k >= 5 ? k : radiusState.km; };
+async function takeWake() { try { if (navigator.wakeLock && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch (e) {} }
+function stopFollow() {
+  if (followId !== null) navigator.geolocation.clearWatch(followId);
+  followId = null; followLast = null; followBox.checked = false;
+  try { localStorage.removeItem("botFollow"); } catch (e) {}
+  try { if (wakeLock) wakeLock.release(); } catch (e) {} wakeLock = null;
+}
+function startFollow() {
+  if (!botToken) return;
+  if (!navigator.geolocation) { botMsg("Браузер не підтримує геолокацію."); followBox.checked = false; return; }
+  followBox.checked = true; try { localStorage.setItem("botFollow", "1"); } catch (e) {}
+  botMsg("📡 Визначаю місце…"); takeWake();
+  followId = navigator.geolocation.watchPosition(async pos => {
+    const lat = pos.coords.latitude, lng = pos.coords.longitude, first = !followLast;
+    radiusState.center = [lat, lng]; radiusState.where = "ваше місце, точність ±" + Math.round(pos.coords.accuracy) + " м";
+    _saveRadius(); updateRadius();
+    if (first && radiusState.on) fitRadius();
+    const moved = followLast ? map.distance(followLast, [lat, lng]) : Infinity;
+    if (moved < 100 || Date.now() - followSentAt < 20000) return;
+    followSentAt = Date.now(); followLast = [lat, lng];
+    try {
+      const r = await botPost("/link/sync", { token: botToken, lat, lng, km: confirmedKm() });
+      if (r.status === 404) { botToken = ""; try { localStorage.removeItem("botToken"); } catch (e) {} stopFollow(); showBotState(); botMsg("Підключення втрачено — введіть новий код."); }
+      else if (r.ok) { botSent = `${lat},${lng},${confirmedKm()}`; try { localStorage.setItem("botSent", botSent); } catch (e) {} refreshBotBtn(); botMsg("📡 Місце оновлено для бота " + new Date().toLocaleTimeString("uk-UA")); }
+    } catch (e) { botMsg("Немає зв'язку — місце для бота не оновлено."); }
+  }, err => { botMsg(err.code === 1 ? "Доступ до геолокації заборонено — дозвольте його для сайту." : "Не вдалося визначити місце."); stopFollow(); },
+  { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+}
+followBox.onchange = () => followBox.checked ? startFollow() : (stopFollow(), botMsg("Постійну геолокацію вимкнено."));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && followId !== null) takeWake(); });
+const _unlinkBtn = document.getElementById("botUnlink").onclick;
+document.getElementById("botUnlink").onclick = async () => { stopFollow(); await _unlinkBtn(); };
+const _setCenter = setRadiusCenter;
+setRadiusCenter = function (...a) { if (followId !== null) { stopFollow(); botMsg("Постійну геолокацію вимкнено — центр заданий вручну."); } _setCenter(...a); };
+try { if (botToken && localStorage.getItem("botFollow")) startFollow(); } catch (e) {}
