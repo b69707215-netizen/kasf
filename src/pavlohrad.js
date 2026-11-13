@@ -132,20 +132,34 @@ const sleep = ms => new Promise(res => setTimeout(res, ms));
 export async function run(env) {
   if (!env.BOT_TOKEN) { console.log("bot: BOT_TOKEN не заданий"); return; }
   if (!env.STATE) { console.log("bot: KV STATE не підключено — без нього не можна уникнути дублів"); return; }
-  let st;
+  /* KV кешує читання до 60 с, тому «старий» ключ міг віддати застарілий стан → дубль «ВІДБІЙ».
+     Пишемо у ключ з номером хвилини (його ще ніхто не читав → без кешу), читаємо найсвіжіший із останніх 10. */
+  const minute = Math.floor(Date.now() / 60000);
+  let st, loadedAt = -1, rawStr = null;
   try {
-    const raw = JSON.parse((await env.STATE.get("pavlohrad")) || "{}");
+    for (let k = 0; k < 10 && rawStr === null; k++) {
+      rawStr = await env.STATE.get(`pavlohrad:${minute - k}`);
+      if (rawStr !== null) loadedAt = minute - k;
+    }
+    if (rawStr === null) rawStr = await env.STATE.get("pavlohrad");   // старий формат ключа
+    const raw = JSON.parse(rawStr || "{}");
     const old = Array.isArray(raw.ids) ? raw.ids : [];   // старий формат: один спільний список
     st = { private: Array.isArray(raw.private) ? raw.private : old, group: Array.isArray(raw.group) ? raw.group : old };
   } catch { st = { private: [], group: [] }; }
   let last = JSON.stringify(st);
+  let wrote = loadedAt === minute;   // у цій хвилині вже є запис
+  // без змін оновлюємо ключ раз на ~5 хв, щоб стан не зник (TTL 20 хв), але не вичерпати ліміт записів
+  const needRefresh = loadedAt < 0 || minute - loadedAt >= 5;
   const users = await listUsers(env).catch(() => []);
   for (let i = 0; i < PASSES; i++) {
     if (i) await sleep(PASS_EVERY_MS);
     try {
       st = await pass(env, st, users);
       const dump = JSON.stringify(st);
-      if (dump !== last) { await env.STATE.put("pavlohrad", dump); last = dump; }   // у KV пишемо лише зміни (ліміти записів)
+      if (dump !== last || (needRefresh && !wrote)) {   // у KV пишемо лише зміни (ліміти записів)
+        await env.STATE.put(`pavlohrad:${minute}`, dump, { expirationTtl: 1200 });
+        last = dump; wrote = true;
+      }
     } catch (e) { console.log("bot pass error", e && e.message); }
   }
 }
