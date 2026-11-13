@@ -23,8 +23,9 @@ const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ці
   "і напишу «відбій», коли небезпека мине.\n\n📏 «Радіус» — змінити радіус (до 150 км).\n" +
   "📍 «Моя геолокація» — поставити свою точку замість Павлограда (один раз; для постійної — «Поділитися геопозицією» через 📎).\n" +
   "🔗 «Код для карти» — підключити карту.\n\nЩоб відписатися — /stop";
-const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сюди про цілі в радіусі 30 км від Павлограда і «відбій», коли небезпека мине.\n\n" +
-  "Свій центр і радіус для групи: /code — код для карти (введіть його на карті) та /radius 50 (до 150 км).\n" +
+const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сюди про цілі в радіусі 10 км від Павлограда і «відбій», коли небезпека мине.\n\n" +
+  "Радіус для групи: /radius 50 (будь-який від 5 до 150 км).\n" +
+  "Свій центр замість Павлограда: /code — код для карти (введіть його на карті); /home — назад до Павлограда.\n" +
   "Якщо бот не бачить команд — зробіть його адміністратором групи. Зупинити — /stop";
 const KEYBOARD = { keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }], [{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
@@ -69,7 +70,7 @@ export async function handleWebhook(request, env) {
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
     if (!subs.includes(chat)) await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
-    await tgApi(env, "sendMessage", { chat_id: chat, text: HELLO, reply_markup: KEYBOARD });
+    await tgApi(env, "sendMessage", { chat_id: chat, text: Number(chat) < 0 ? GROUP_HELLO : HELLO, reply_markup: KEYBOARD });
   } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
     const km = await setHomeFromBot(env, chat);
     await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
@@ -82,7 +83,7 @@ export async function handleWebhook(request, env) {
     } else {
       const res = await setRadiusFromBot(env, chat, +n[1]);
       const msg = res === "range" ? "Радіус має бути від 5 до 150 км."
-        : `✅ Радіус ${res.km} км. ` + (res.home ? "Центр — Павлоград. Своя точка: «📍 Моя геолокація»." : "Центр — ваша точка.");
+        : `✅ Радіус ${res.km} км. ` + (res.home ? (Number(chat) < 0 ? "Центр — Павлоград. Свій центр: /code." : "Центр — Павлоград. Своя точка: «📍 Моя геолокація».") : "Центр — ваша точка.");
       await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : KEYBOARD });
     }
   } else if (text.startsWith("/code") || text.includes("код для карти")) {

@@ -61,7 +61,7 @@ export async function syncFromMap(request, env) {
 
 /* Стандартний центр — Павлоград. Без власної точки бот рахує радіус від нього. */
 export const HOME = { lat: 48.52, lng: 35.87 };
-const defaultKm = chat => (Number(chat) < 0 ? 30 : 20);
+const defaultKm = chat => (Number(chat) < 0 ? 10 : 20);
 
 /* Бот: змінити радіус (5–150 км). Без власної точки центр — Павлоград. Повертає { km, home } або "range". */
 export async function setRadiusFromBot(env, chat, km) {
@@ -113,7 +113,7 @@ export async function saveUser(env, u) {
 export async function setLocationFromBot(env, chat, lat, lng, live = false) {
   if (!env.STATE || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const u = JSON.parse((await env.STATE.get("u:" + chat)) || "null") || {};
-  const km = u.km || (Number(chat) < 0 ? 30 : 20);
+  const km = u.km || (Number(chat) < 0 ? 10 : 20);
   if (live && Number.isFinite(u.lat) && Math.hypot((lat - u.lat) * 111, (lng - u.lng) * 70) < 0.1) return km;   // зсув <100 м — не пишемо в KV
   // «жива» точка: не скидаємо ids, щоб не повторювати сповіщення про ті самі цілі
   await env.STATE.put("u:" + chat, JSON.stringify({ ...u, lat, lng, km, home: false, ids: live ? (u.ids || []) : [] }));

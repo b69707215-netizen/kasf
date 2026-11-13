@@ -93,8 +93,8 @@ async function passUsers(env, users, targets) {
   }
 }
 
-/* Стандартні чати без своїх налаштувань: особисті — Павлоград 20 км, групи — Павлоград 30 км */
-const DEFAULT_KM = { private: 20, group: 30 };
+/* Стандартні чати без своїх налаштувань: особисті — Павлоград 20 км, групи й канали — Павлоград 10 км */
+const DEFAULT_KM = { private: 20, group: 10 };
 
 async function defaultChats(env, users) {
   const fixed = String(env.CHAT_IDS || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -103,7 +103,7 @@ async function defaultChats(env, users) {
   return { private: ids.filter(c => Number(c) >= 0), group: ids.filter(c => Number(c) < 0) };
 }
 
-/* Одна перевірка. st = { private: [id], group: [id] } — про які цілі вже повідомили (окремо для 20 і 30 км). */
+/* Одна перевірка. st = { private: [id], group: [id] } — про які цілі вже повідомили (окремо для 20 і 10 км). */
 async function pass(env, st, users) {
   const r = await fetch("https://api.dimap.live/api/targets", { headers: { "User-Agent": "radf4-pavlohrad-bot" } });
   if (!r.ok) { console.log("dimap http", r.status); return st; }   // джерело недоступне — нічого не вирішуємо
