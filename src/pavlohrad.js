@@ -3,10 +3,13 @@
 // кожного запуску — 12 перевірок з паузою 5 с, тож про нову ціль повідомляємо за ≈5 с.
 import { getSubs } from "./telegram.js";
 import { listUsers, saveUser, HOME } from "./link.js";
+import { checkBallistic, ballisticText } from "./ballistic.js";
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
 const PASS_EVERY_MS = 5 * 1000;   // пауза між перевірками всередині одного запуску
+const CLEAR_DELAY_MS = 2 * 60 * 1000;   // «ВІДБІЙ» лише коли цілей немає 2 хв поспіль (проти «миготіння» на межі радіуса)
+const URGENT_MIN = 3;             // ціль летить на точку і долетить за ≤3 хв → термінове сповіщення зі звуком
 const PASSES = 12;                // 12 перевірок на хвилину = раз на 5 с
 
 const R = 6371;
@@ -54,12 +57,16 @@ export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RA
   return out.sort((a, b) => a.km - b.km);
 }
 
+export const isUrgent = t => t.toward && t.etaMin != null && t.etaMin <= URGENT_MIN;
+const tagIds = list => list.map(t => t.id + (isUrgent(t) ? "!" : ""));   // «!» — щойно стала терміновою → нове сповіщення
+const URGENT_HEAD = "🚨 ТЕРМІНОВО — В УКРИТТЯ! 🚨\n\n";
+
 /* Текст для «домашнього» центру (Павлоград) */
 export function alertText(list, km = RADIUS_KM) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від ${CENTER.name}а\n   курс ${t.course}°, ${t.speed} км/год` +
     (t.toward ? `\n   ➜ летить на ${CENTER.name}, ~${t.etaMin} хв` : `\n   не прямо на ${CENTER.name} (за курсом)`));
-  return `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
+  return `${list.some(isUrgent) ? URGENT_HEAD : ""}⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
 }
 export const clearText = (km = RADIUS_KM) => `✅ ВІДБІЙ. В радіусі ${km} км від ${CENTER.name}а цілей більше немає.`;
 
@@ -68,15 +75,33 @@ export function userAlertText(list, km) {
   const lines = list.map(t =>
     `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від вас\n   курс ${t.course}°, ${t.speed} км/год` +
     (t.toward ? `\n   ➜ летить на вас, ~${t.etaMin} хв` : "\n   не прямо на вас (за курсом)"));
-  return `⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
+  return `${list.some(isUrgent) ? URGENT_HEAD : ""}⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)\n\n${lines.join("\n\n")}\n\nНапрямок — оцінка за курсом. Джерело: https://damih-havajsa.pp.ua/`;
 }
 
-async function sendOne(env, chat_id, text) {
+async function sendOne(env, chat_id, text, loud = true) {
   const r = await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id, text, disable_web_page_preview: true })
+    body: JSON.stringify({ chat_id, text, disable_web_page_preview: true, disable_notification: !loud })
   });
-  if (!r.ok) console.log("telegram send failed", chat_id, r.status);
+  if (!r.ok) { console.log("telegram send failed", chat_id, r.status); return null; }
+  try { return (await r.json()).result.message_id || null; } catch { return null; }
+}
+
+/* Автовидалення: кожне повідомлення бота (тривога, відбій) видаляється через 30 хв після відправки.
+   Список у стані: [{id, t}]. Помилки видалення ігноруємо (вже видалено / старіше 48 год). */
+const DELETE_AFTER_MS = 30 * 60 * 1000;
+const keepIds = (arr, id) => (id ? [...(arr || []), { id, t: Date.now() }] : [...(arr || [])]).slice(-100);
+async function sweep(env, chat_id, arr) {
+  const now = Date.now(), keep = [];
+  for (const m of arr || []) {
+    if (!m || typeof m !== "object") continue;   // старий формат (просто id) відкидаємо
+    if (now - m.t < DELETE_AFTER_MS) { keep.push(m); continue; }
+    await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id, message_id: m.id })
+    }).catch(() => {});
+  }
+  return keep;
 }
 
 /* Індивідуальні налаштування (власна точка або змінений радіус від Павлограда):
@@ -84,12 +109,17 @@ async function sendOne(env, chat_id, text) {
 async function passUsers(env, users, targets) {
   for (const u of users) {
     const list = nearTargets(targets, Date.now(), { lat: u.lat, lng: u.lng }, u.km);
-    const ids = list.map(t => t.id), prev = u.ids || [];
-    let msg = null;
-    if (ids.some(id => !prev.includes(id))) msg = u.home ? alertText(list, u.km) : userAlertText(list, u.km);
-    else if (!list.length && prev.length) msg = u.home ? clearText(u.km) : `✅ ВІДБІЙ. У вашому радіусі ${u.km} км цілей більше немає.`;
-    if (msg) await sendOne(env, u.chat, msg);
-    if (ids.join() !== prev.join()) { u.ids = ids; await saveUser(env, u); }
+    const tags = tagIds(list), prev = u.ids || [], prevMsgs = JSON.stringify(u.msgs || []), prevEmpty = u.emptyAt || 0;
+    let msg = null, ids = tags, loud = true;
+    if (tags.some(id => !prev.includes(id))) { msg = u.home ? alertText(list, u.km) : userAlertText(list, u.km); loud = list.some(isUrgent); u.emptyAt = 0; }
+    else if (!list.length && prev.length) {
+      if (!u.emptyAt) { u.emptyAt = Date.now(); ids = prev; }                       // порожньо — чекаємо, чи не «миготіння»
+      else if (Date.now() - u.emptyAt < CLEAR_DELAY_MS) ids = prev;
+      else { msg = u.home ? clearText(u.km) : `✅ ВІДБІЙ. У вашому радіусі ${u.km} км цілей більше немає.`; loud = false; u.emptyAt = 0; }
+    } else if (list.length) u.emptyAt = 0;
+    u.msgs = await sweep(env, u.chat, u.msgs);
+    if (msg) { const id = await sendOne(env, u.chat, msg, loud); u.msgs = keepIds(u.msgs, id); }
+    if (ids.join() !== prev.join() || JSON.stringify(u.msgs || []) !== prevMsgs || (u.emptyAt || 0) !== prevEmpty) { u.ids = ids; await saveUser(env, u); }
   }
 }
 
@@ -111,21 +141,48 @@ async function pass(env, st, users) {
   if (!Array.isArray(data.targets)) return st;
   await passUsers(env, users, data.targets).catch(e => console.log("users pass error", e && e.message));
   const chats = await defaultChats(env, users);
-  const next = { private: st.private, group: st.group };
+  const next = { private: st.private, group: st.group, msgs: { ...(st.msgs || {}) }, ball: st.ball || [], empty: { ...(st.empty || {}) } };
   for (const cls of ["private", "group"]) {
     const km = DEFAULT_KM[cls], prev = st[cls];
     const list = nearTargets(data.targets, Date.now(), CENTER, km);
-    const ids = list.map(t => t.id);
-    let msg = null;
-    if (ids.some(id => !prev.includes(id))) msg = alertText(list, km);
-    else if (!list.length && prev.length) msg = clearText(km);
-    if (msg) for (const c of chats[cls]) await sendOne(env, c, msg);
+    let ids = tagIds(list), msg = null, loud = true;
+    if (ids.some(id => !prev.includes(id))) { msg = alertText(list, km); loud = list.some(isUrgent); delete next.empty[cls]; }
+    else if (!list.length && prev.length) {
+      const since = next.empty[cls];
+      if (!since) { next.empty[cls] = Date.now(); ids = prev; }
+      else if (Date.now() - since < CLEAR_DELAY_MS) ids = prev;
+      else { msg = clearText(km); loud = false; delete next.empty[cls]; }
+    } else if (list.length) delete next.empty[cls];
+    if (msg) await inBatches(chats[cls], async c => {
+      const id = await sendOne(env, c, msg, loud);
+      if (id) next.msgs[c] = keepIds(next.msgs[c], id);
+    });
     next[cls] = ids;
+  }
+  for (const c of Object.keys(next.msgs)) {   // видаляємо повідомлення старші за 30 хв
+    const left = await sweep(env, c, next.msgs[c]);
+    if (left.length) next.msgs[c] = left; else delete next.msgs[c];
   }
   return next;
 }
 
 const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+/* Відправка пачками по 25 паралельно (ліміт Telegram ≈30 повідомлень/с) */
+async function inBatches(items, fn, size = 25) {
+  for (let i = 0; i < items.length; i += size) await Promise.all(items.slice(i, i + size).map(x => fn(x).catch(e => console.log("send error", e && e.message))));
+}
+
+/* Загроза балістики → усім підписникам (особисті, групи, власні точки), без прив'язки до радіуса */
+async function ballisticPass(env, st, users) {
+  const { posts, seen } = await checkBallistic(st.ball);
+  st = { ...st, ball: seen };
+  if (!posts.length) return st;
+  const d = await defaultChats(env, users);
+  const all = [...new Set([...d.private, ...d.group, ...users.map(u => u.chat)])];
+  for (const p of posts) await inBatches(all, c => sendOne(env, c, ballisticText(p)));
+  return st;
+}
 
 /* Запуск за розкладом (раз на хвилину): PASSES перевірок з паузою PASS_EVERY_MS.
    Стан між запусками — у KV; всередині запуску тримаємо його в пам'яті (KV може віддавати кеш до хвилини). */
@@ -144,7 +201,7 @@ export async function run(env) {
     if (rawStr === null) rawStr = await env.STATE.get("pavlohrad");   // старий формат ключа
     const raw = JSON.parse(rawStr || "{}");
     const old = Array.isArray(raw.ids) ? raw.ids : [];   // старий формат: один спільний список
-    st = { private: Array.isArray(raw.private) ? raw.private : old, group: Array.isArray(raw.group) ? raw.group : old };
+    st = { private: Array.isArray(raw.private) ? raw.private : old, group: Array.isArray(raw.group) ? raw.group : old, msgs: raw.msgs && typeof raw.msgs === "object" ? raw.msgs : {}, ball: Array.isArray(raw.ball) ? raw.ball : [] };
   } catch { st = { private: [], group: [] }; }
   let last = JSON.stringify(st);
   let wrote = loadedAt === minute;   // у цій хвилині вже є запис
@@ -155,6 +212,7 @@ export async function run(env) {
     if (i) await sleep(PASS_EVERY_MS);
     try {
       st = await pass(env, st, users);
+      if (i % 2 === 0) st = await ballisticPass(env, st, users).catch(e => { console.log("ballistic pass error", e && e.message); return st; });   // раз на 10 с
       const dump = JSON.stringify(st);
       if (dump !== last || (needRefresh && !wrote)) {   // у KV пишемо лише зміни (ліміти записів)
         await env.STATE.put(`pavlohrad:${minute}`, dump, { expirationTtl: 1200 });

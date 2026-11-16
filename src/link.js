@@ -106,7 +106,7 @@ export async function saveUser(env, u) {
   // міняємо лише ids: радіус міг оновитися з карти, поки йшла перевірка; відв'язаного не воскрешаємо
   const cur = JSON.parse((await env.STATE.get("u:" + u.chat)) || "null");
   if (!cur || cur.token !== u.token) return;
-  await env.STATE.put("u:" + u.chat, JSON.stringify({ ...cur, ids: u.ids }));
+  await env.STATE.put("u:" + u.chat, JSON.stringify({ ...cur, ids: u.ids, msgs: u.msgs || [] }));
 }
 
 /* Бот: центр радіуса з геолокації Telegram (кнопка «📍 Моя геолокація»). Працює і без карти. */

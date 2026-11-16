@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Карта тривог України у реальному часі (з Telegram)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#181d26">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link rel="stylesheet" href="css/app.css?v=6">
 <script>
 /* Сайт складається з окремих файлів (css/, js/), тому його не можна відкривати просто як файл — лише через сервер. */
@@ -22,7 +25,7 @@ if (!/^https?:$/.test(location.protocol)) {
 <div id="app">
   <aside id="sidebar">
     <header>
-      <h1><span class="flag">🇺🇦</span> Карта тривог України</h1>
+      <h1><img src="icons/icon-192.png" alt="" style="width:28px;height:28px;vertical-align:middle;border-radius:50%"> Карта тривог України</h1>
       <div class="sub">Цілі та тривоги: dimap.live + офіційні джерела + Telegram-канали</div>
       <div class="badges">
         <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
@@ -33,6 +36,7 @@ if (!/^https?:$/.test(location.protocol)) {
       <div class="controls">
         <button id="btnSound">🔇 Звук: вимк</button>
         <button id="btnRefresh">⟳ Оновити</button>
+        <button id="btnInstall" style="display:none">📲 Встановити</button>
       </div>
       <div id="official" class="official">⏳ Офіційні тривоги: завантаження…</div>
       <div id="raions" class="official">⏳ Тривоги по районах: завантаження…</div>
@@ -85,5 +89,6 @@ if (!/^https?:$/.test(location.protocol)) {
 <script src="js/raions.js?v=1"></script>
 <script src="js/radius.js?v=6"></script>
 <script src="js/app.js?v=1"></script>
+<script src="js/install.js?v=1"></script>
 </body>
 </html>

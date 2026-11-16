@@ -146,3 +146,10 @@ index.html у Блокноті:
 - Приватні канали (t.me/+...) читати не можна — тільки через бота.
 - Це неофіційна карта: стан по словах у постах, можливі хибні
   спрацювання. Офіційно — сирена та alert.in.ua.
+
+APK для Android
+---------------
+1) Розгорнути сайт:  npx wrangler deploy   (потрібні manifest.webmanifest і sw.js на сайті)
+2) Зібрати APK:      android\build-apk.cmd https://kasf.XXXX.workers.dev
+   Перший запуск скачає Android SDK і спитає пароль для ключа підпису (radf4.keystore — збережіть його!).
+3) Файл android\build\app-release-signed.apk скинути на телефон і встановити.
