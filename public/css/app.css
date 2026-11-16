@@ -373,8 +373,35 @@
   .ctl-credit { padding: 12px 0 10px; font-size: 11.5px; color: #8f95a1; line-height: 1.5; border-top: 1px solid #3a4150; }
 
 /* ===== Плоска мапа (як офіційна): назви областей білим по центру ===== */
-#map.flat { background: #141921; }
-.ob-label { background: none; border: none; display: none; pointer-events: none; }
-#map.flat .ob-label { display: block; }
+.ob-label { background: none; border: none; pointer-events: none; }
 #map.z-hi .ob-label { display: none; }
-.ob-label span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; color: #fff; font: 600 12px/1.1 "Segoe UI", Arial, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.ob-label span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; color: rgba(255,255,255,.55); font: 600 11px/1.1 "Segoe UI", Arial, sans-serif; letter-spacing: .08em; text-transform: uppercase; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+
+/* ===== Анімації цілей: плавний поворот, поява, зникнення ===== */
+.plane-marker svg { transition: transform 0.9s ease-out; }
+.plane-marker.tg-in > * { animation: tgIn 0.7s cubic-bezier(.2, .8, .3, 1); }
+.plane-marker.tg-out > * { animation: tgOut 1.1s ease-in forwards; }
+.plane-marker.tg-out { pointer-events: none; }
+@keyframes tgIn { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: scale(1); } }
+@keyframes tgOut {
+  0%   { opacity: 1; transform: scale(1) rotate(0deg); filter: none; }
+  35%  { opacity: 1; transform: scale(1.25) rotate(8deg); filter: brightness(2.4) drop-shadow(0 0 6px #ff7a45); }
+  100% { opacity: 0; transform: scale(0.15) rotate(40deg); filter: brightness(1) blur(2px); }
+}
+/* кільце й спалах на місці, де ціль зникла */
+.tg-boom { background: none; border: none; pointer-events: none; }
+.tg-boom i { position: absolute; left: 50%; top: 50%; border-radius: 50%; display: block; }
+.tg-boom .b1 { width: 12px; height: 12px; margin: -6px 0 0 -6px; border: 2px solid #ff7a45; animation: tgRing 1.1s ease-out forwards; }
+.tg-boom .b2 { width: 14px; height: 14px; margin: -7px 0 0 -7px; border: 1.5px solid rgba(255, 255, 255, 0.85); animation: tgRing 1.1s 0.15s ease-out forwards; opacity: 0; }
+.tg-boom .b3 { width: 36px; height: 36px; margin: -18px 0 0 -18px; background: radial-gradient(circle, #fff 0, #ffb347 38%, rgba(255, 80, 40, 0) 70%); animation: tgFlash 0.6s ease-out forwards; }
+@keyframes tgRing { 0% { transform: scale(0.4); opacity: 0.95; } 100% { transform: scale(4.2); opacity: 0; } }
+@keyframes tgFlash { 0% { transform: scale(0.2); opacity: 1; } 100% { transform: scale(1.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .plane-marker svg { transition: none; } .plane-marker.tg-in > *, .plane-marker.tg-out > *, .tg-boom i { animation-duration: 0.01s; } }
+
+/* підписи міст українською (map.js) */
+.city-lbl { background: none; border: none; pointer-events: none; }
+.city-lbl i { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 50%; background: #c9d1e0; box-shadow: 0 0 2px #000; }
+.city-lbl span { position: absolute; left: 5px; top: -8px; white-space: nowrap; color: #d6dceb; font: 500 11px/1.2 "Segoe UI", Arial, sans-serif; text-shadow: 0 0 3px #000, 0 0 3px #000, 0 0 1px #000; }
+.city-lbl.mid span { font-size: 12px; font-weight: 600; }
+.city-lbl.big span { font-size: 13.5px; font-weight: 700; color: #fff; }
+.city-lbl.big i { width: 6px; height: 6px; left: -3px; top: -3px; background: #fff; }

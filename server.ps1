@@ -5,7 +5,7 @@ $base = $PSScriptRoot
 $root = Join-Path $PSScriptRoot "public"   # the site lives in public/ (same as on Cloudflare)
 $port = if ($env:KARTA_PORT) { [int]$env:KARTA_PORT } else { 8802 }
 # hosts allowed for /proxy (so the server does not become an open proxy)
-$allowedHosts = @("t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live", "map.ukrainealarm.com")
+$allowedHosts = @("t.me", "api.dimap.live", "map.ukrainealarm.com")
 
 # Each request is handled in its own runspace (parallel). Before: one request at a time, so one slow
 # upstream (up to 15 s) froze the whole page and data arrived late or not at all.
