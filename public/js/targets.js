@@ -3,7 +3,6 @@
 const dimapGroup = L.layerGroup().addTo(map);
 let dimapCount = 0;
 const dimapMarkers = new Map();   // id цілі -> { marker, trail, kind, brg }
-const SHOW_TG_TARGETS = false;    // цілі беремо лише з dimap.live (для синхронності); true — додати й точки з Telegram
 /* Кожен тип цілі має свій колір — на карті, у легенді й у списку */
 const TARGET_STYLE = {
   shahed:   { color: "#ffaa00", label: "Шахед / БпЛА" },
@@ -90,8 +89,9 @@ const TARGET_SVG = {
 /* Свої картинки цілей: покладіть PNG з прозорим фоном у public/icons/targets/<тип>.png
    (shahed, reactive, lancet, cruise, missile, kab, fpv, avia, other). Якщо файл є — іконка береться з нього, інакше малюється SVG.
    IMG_NOSE — куди «дивиться ніс» на картинці в градусах за годинниковою стрілкою від «вгору» (0 — ніс угору, 90 — праворуч). */
+const ICON_STYLE_FLAT = true;   // білі піктограми (PNG-картинки не потрібні — не робимо 9 зайвих запитів, 4 з них давали 404)
 const IMG_ICONS = {}, IMG_NOSE = {}, IMG_ALIAS = { reactive: "shahed" };
-const imgReady = Promise.all(Object.keys(TARGET_STYLE).map(k => new Promise(res => {
+const imgReady = typeof ICON_STYLE_FLAT !== "undefined" ? Promise.resolve() : Promise.all(Object.keys(TARGET_STYLE).map(k => new Promise(res => {
   const im = new Image();
   im.onload = () => { IMG_ICONS[k] = true; res(); };
   im.onerror = () => res();
@@ -102,7 +102,7 @@ const sizeForZoom = z => Math.max(22, Math.min(56, Math.round(14 + (z - 5) * 7))
 let ICON_PX = sizeForZoom(typeof map !== "undefined" && map.getZoom ? map.getZoom() : 8);
 /* HTML значка (для маркера й для легенди). Світлий контур + кольорове сяйво — щоб темна картинка читалась на червоній карті. */
 const ICON_STYLE = "flat";    // "flat" — прості білі піктограми з червоним сяйвом (як на еталонній карті); "photo" — картинки з icons/targets/
-const SHOW_PATHS = false;     // сліди, пунктир курсу й конуси загрози (true — повернути)
+const SHOW_PATHS = true;      // сліди, пунктир курсу й конуси загрози (true — повернути)
 function iconHtml(key, deg, px, noGlow) {
   if (ICON_STYLE === "flat") {
     const draw = TARGET_SVG[key] || TARGET_SVG.other;
@@ -136,49 +136,69 @@ map.on("zoomend", () => {
   for (const e of dimapMarkers.values()) e.marker.setIcon(targetIcon(e.key, e.brg));
 });
 
-/* Легенда: що означає кожен значок (натисніть на заголовок, щоб згорнути) */
-const LEGEND_KEYS = ["shahed", "reactive", "lancet", "cruise", "missile", "kab", "fpv", "avia"];
-imgReady.then(() => {
-  const wrap = document.getElementById("mapwrap");
-  if (!wrap || document.getElementById("tgLegend")) return;
-  const d = document.createElement("div");
-  d.id = "tgLegend"; d.className = "legend";
-  d.style.cssText = "max-width:240px;cursor:pointer;line-height:1.5;padding:8px 10px";
-  const rows = LEGEND_KEYS.map(k => `<div style="display:flex;align-items:center;gap:8px;margin-top:3px"><span style="display:inline-flex;width:30px;height:30px;align-items:center;justify-content:center;flex:none">${iconHtml(k, 0, 28)}</span><span>${TARGET_STYLE[k].label}</span></div>`).join("");
-  let open = window.innerWidth > 700;   // на телефоні легенда спочатку згорнута
-  const render = () => { d.innerHTML = `<b>🎯 Що це за цілі ${open ? "▾" : "▸"}</b>${open ? rows : ""}`; };
-  d.addEventListener("click", () => { open = !open; render(); });
-  render();
-  wrap.appendChild(d);
-});
-
 /* Плавне пересування цілі до нової позиції (без CSS-переходу, тому при русі/зумі карти цілі
    не «їдуть» за курсором: позиція змінюється лише коли приходять нові дані). */
-function moveMarker(e, to) {
+function moveMarker(e, to, spd, brg) {
   if (e.raf) { cancelAnimationFrame(e.raf); e.raf = null; }
+  const t0 = performance.now();
+  /* реальний інтервал між оновленнями цієї цілі (згладжуємо): рух займає саме стільки, тож ціль не «стоїть і смикається» */
+  if (e.updAt) { const dt = t0 - e.updAt; if (dt > 1000 && dt < 20000) e.interval = e.interval ? e.interval * 0.6 + dt * 0.4 : dt; }
+  e.updAt = t0;
   const from = e.marker.getLatLng();
   const dist = map.distance(from, to);
   if (dist < 5 || dist > 80000) { e.marker.setLatLng(to); return; }   // майже на місці або «стрибок» — одразу
-  const t0 = performance.now(), D = 4500;
+  const D = Math.max(2500, Math.min(9000, (e.interval || 5000) * 1.05)), mps = spd > 20 ? spd * 1000 / 3600 : 0;
   const step = now => {
     if (map._animatingZoom) { e.raf = requestAnimationFrame(step); return; }   // під час анімації зуму не чіпаємо позицію
-    const k = Math.min(1, (now - t0) / D);
-    e.marker.setLatLng([from.lat + (to[0] - from.lat) * k, from.lng + (to[1] - from.lng) * k]);
-    e.raf = k < 1 ? requestAnimationFrame(step) : null;
+    const el = now - t0;
+    if (el < D) {
+      const k = el / D;
+      e.marker.setLatLng([from.lat + (to[0] - from.lat) * k, from.lng + (to[1] - from.lng) * k]);
+      e.raf = requestAnimationFrame(step);
+    } else if (mps && el < D + 3500) {   // нові дані ще не прийшли — ціль не зупиняється, а летить далі за курсом і швидкістю
+      e.marker.setLatLng(destination(to, brg, mps * (el - D) / 1000));
+      e.raf = requestAnimationFrame(step);
+    } else e.raf = null;
   };
   e.raf = requestAnimationFrame(step);
 }
 
+/* Плавний поворот іконки (CSS-перехід, найкоротшим шляхом) — без перестворення маркера, тож без блимання */
+function setRotation(e, brg) {
+  const el = e.marker.getElement(), svg = el && el.querySelector("svg");
+  if (!svg) return false;
+  const cur = ((e.rotAbs % 360) + 360) % 360, delta = ((brg - cur + 540) % 360) - 180;
+  e.rotAbs += delta;
+  svg.style.transform = `rotate(${e.rotAbs}deg)`;
+  return true;
+}
+
+/* Ціль зникла (збита, впала, пропала з джерела): іконка розсипається, розходиться кільце — і лише потім прибираємо */
+function retireTarget(e) {
+  if (e.raf) { cancelAnimationFrame(e.raf); e.raf = null; }
+  [e.trail, e.ray, e.rayEnd, e.zone].forEach(l => l && dimapGroup.removeLayer(l));
+  const el = e.marker.getElement(), at = e.marker.getLatLng();
+  if (el) el.classList.add("tg-out");
+  e.marker.off(); e.marker.closePopup();
+  const boom = L.marker(at, { icon: L.divIcon({ className: "tg-boom", html: "<i class=\"b1\"></i><i class=\"b2\"></i><i class=\"b3\"></i>", iconSize: [60, 60], iconAnchor: [30, 30] }), interactive: false, keyboard: false, zIndexOffset: 900 }).addTo(dimapGroup);
+  setTimeout(() => { dimapGroup.removeLayer(e.marker); dimapGroup.removeLayer(boom); }, 1300);
+}
+let tgFirstLoad = true;   // при першому завантаженні цілі не «вилітають» анімацією — лише нові, що з'явилися потім
+
 /* Допоміжне: сторона світу, найближчий населений пункт, область у точці */
 const COMPASS = ["північ", "північний схід", "схід", "південний схід", "південь", "південний захід", "захід", "північний захід"];
 function compassUk(deg) { return COMPASS[Math.round((((deg % 360) + 360) % 360) / 45) % 8]; }
+/* Швидкий фільтр за градусами перед точною відстанню: раніше на кожну ціль кожні 3 с рахувалась відстань до всіх ~2000 пунктів */
+const _near = (p, lat, lng, km) => Math.abs(p.ll[0] - lat) * 111 <= km && Math.abs(p.ll[1] - lng) * 74 <= km;
 function nearestPlace(lat, lng, maxKm) {
   let best = null, bd = 1e9;
+  maxKm = maxKm || 40;
   for (const p of allPlaces) {
+    if (!_near(p, lat, lng, maxKm)) continue;
     const d = map.distance([lat, lng], p.ll) / 1000;
     if (d < bd) { bd = d; best = p; }
   }
-  return best && bd <= (maxKm || 40) ? { name: best.name, km: bd } : null;
+  return best && bd <= maxKm ? { name: best.name, km: bd } : null;
 }
 let ukrData = null; UKR.then(u => { ukrData = u; });
 const _bbox = {};
@@ -227,6 +247,7 @@ function possibleTargets(lat, lng, bearing, speedKmh) {
   if (!(speedKmh > 20)) return [];
   const from = [lat, lng], maxKm = speedKmh * 0.75, out = [];
   for (const p of allPlaces) {
+    if (!_near(p, lat, lng, maxKm)) continue;
     const dKm = map.distance(from, p.ll) / 1000;
     if (dKm < 3 || dKm > maxKm) continue;
     const diff = Math.abs(((bearingTo(from, p.ll) - bearing + 540) % 360) - 180);
@@ -250,9 +271,12 @@ async function refreshDimapTargets() {
     const seenAt = Date.parse(t.lastSeen);
     if (seenAt && Date.now() - seenAt > maxAge) return;
     const id = String(t.id);
-    alive.add(id);
     const key = dimapKind(t.type || ""), st = TARGET_STYLE[key];
     const brg = t.bearing || 0, spd = t.speed || 0, here = [t.lat, t.lng];
+    /* Нерухомі FPV / авіація / «не визначена» (швидкість 0) — не політ, а мітки джерела (де помічено або де база). Нікому не потрібні:
+       на карті не показуємо й не рахуємо (як і в боті). Рухомі цілі й шахеди, ракети, КАБ — показуємо завжди. */
+    if (spd < 5 && (key === "fpv" || key === "avia" || key === "other")) return;
+    alive.add(id);
     const poss = possibleTargets(t.lat, t.lng, brg, spd);
     const near = nearestPlace(t.lat, t.lng, 40), obl = oblastAt(t.lat, t.lng);
     const where = (near ? `біля ${near.name}` : "") + (obl ? `${near ? ", " : ""}${obl.name}` : "");
@@ -272,14 +296,17 @@ async function refreshDimapTargets() {
 
     let e = dimapMarkers.get(id);
     if (e) {   // та сама ціль — пересуваємо й повертаємо без миготіння
-      moveMarker(e, here);
-      if (e.key !== key || e.brg !== brg) { e.marker.setIcon(targetIcon(key, brg)); e.key = key; e.brg = brg; }
+      moveMarker(e, here, spd, brg);
+      if (e.key !== key) { e.marker.setIcon(targetIcon(key, brg)); e.key = key; e.brg = brg; e.rotAbs = brg; }   // змінився тип — нова іконка
+      else if (e.brg !== brg) { if (!setRotation(e, brg)) { e.marker.setIcon(targetIcon(key, brg)); e.rotAbs = brg; } e.brg = brg; }   // лише курс — плавний поворот
       e.marker.setPopupContent(html);
     } else {
       const marker = L.marker(here, { icon: targetIcon(key, brg), zIndexOffset: 800 }).bindPopup(html, { maxWidth: 300 }).addTo(dimapGroup);
       const pts = Array.isArray(t.history) ? t.history.map(p => Array.isArray(p) ? [p[0], p[1]] : (p && Number.isFinite(p.lat) ? [p.lat, p.lng] : null)).filter(Boolean) : [];
-      e = { marker, key, brg, pts, trail: null, zone: null, ray: null, rayEnd: null };
+      e = { marker, key, brg, rotAbs: brg, updAt: performance.now(), pts, trail: null, zone: null, ray: null, rayEnd: null };
       dimapMarkers.set(id, e);
+      const mel = marker.getElement();
+      if (mel && !tgFirstLoad) { mel.classList.add("tg-in"); setTimeout(() => mel.classList.remove("tg-in"), 800); }   // нова ціль плавно з'являється
     }
     // слід руху: накопичуємо позиції цілі (як лінія маршруту)
     const last = e.pts[e.pts.length - 1];
@@ -309,10 +336,10 @@ async function refreshDimapTargets() {
   // цілі, яких уже немає в dimap — прибираємо
   for (const [id, e] of dimapMarkers) {
     if (alive.has(id)) continue;
-    if (e.raf) cancelAnimationFrame(e.raf);
-    [e.marker, e.trail, e.ray, e.rayEnd, e.zone].forEach(l => l && dimapGroup.removeLayer(l));
+    retireTarget(e);   // зникла — анімація, а не різке зникнення
     dimapMarkers.delete(id);
   }
+  tgFirstLoad = false;
   dimapList = list;
   dimapCount = alive.size;
   if (typeof updateRadius === "function") updateRadius();   // оновлюємо перевірку радіуса

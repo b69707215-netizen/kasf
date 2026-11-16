@@ -16,20 +16,7 @@ function updateTimestamp() {
         `<span class="chip">🎯 цілей: <b>${stale(dimapLastOk) ? "?" : dimapCount}</b></span>`);
 }
 
-async function refreshAll() {
-  $("errBanner").style.display = "none";
-  CHANNELS.forEach(ch => { if (state[ch.id].status !== "ok") state[ch.id].status = "loading"; });
-  render();
-  await Promise.allSettled(CHANNELS.map(refreshChannel));
-  updateTimestamp();
-  const errs = CHANNELS.filter(ch => state[ch.id].status === "error").length;
-  if (errs) showErr(`⚠ ${errs} канал(ів) не вдалося прочитати — повторю спробу за хвилину`);
-}
-
-/* Telegram-канали (старе джерело) вимкнено: 14 запитів кожні 20 с гальмували карту, а пости давали «липкі» тривоги.
-   Дані — офіційний Ukraine Alarm (області й райони) та dimap.live (цілі). true — повернути опитування каналів. */
-const USE_CHANNELS = false;
-$("btnRefresh").onclick = () => { if (USE_CHANNELS) refreshAll(); else { refreshOfficial(); refreshRaions(); refreshDimapTargets(); } };
+$("btnRefresh").onclick = () => { refreshOfficial(); refreshRaions(); refreshDimapTargets(); };
 $("btnSound").onclick = () => {
   soundOn = !soundOn;
   $("btnSound").textContent = soundOn ? "🔊 Звук: увімк" : "🔇 Звук: вимк";
@@ -37,19 +24,11 @@ $("btnSound").onclick = () => {
   if (soundOn) beep();
 };
 
-CHANNELS.forEach(ch => updateTargets(ch));
 render();
 loadOblasts();
 
-/* кожен канал оновлюється сам, зі зсувом у 4с — рівномірне навантаження */
-if (USE_CHANNELS) CHANNELS.forEach((ch, i) => {
-  setTimeout(() => {
-    refreshChannel(ch);
-    setInterval(() => refreshChannel(ch), REFRESH_MS);
-  }, 1500 + i * STAGGER_MS);
-});
 refreshOfficial();
-setInterval(refreshOfficial, 10000);   // області/сирена — кожні 10 с
+setInterval(refreshOfficial, 8000);    // області/сирена — кожні 8 с
 /* панель: ☰ згортає/розгортає; на телефоні за замовчуванням карта на весь екран */
 function toggleSidebar(force) {
   const sb = $("sidebar");
@@ -76,12 +55,11 @@ toggleSidebar(true);   // за замовчуванням видно лише к
 /* повернулися на вкладку — одразу оновлюємо все, не чекаючи таймерів */
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  if (USE_CHANNELS) refreshAll();
   refreshOfficial(); refreshRaions(); refreshDimapTargets();
 });
 
 refreshRaions();
-setInterval(refreshRaions, 5000);           // тривоги по районах — кожні 5 с
+setInterval(refreshRaions, 4000);           // тривоги по районах — кожні 4 с
 refreshDimapTargets();
-setInterval(refreshDimapTargets, 5000);     // цілі — кожні 5 с, як у dimap
-setInterval(render, 15000);  // показники «свіжості» оновлюються з часом, навіть без нових постів
+setInterval(refreshDimapTargets, 3000);     // цілі — кожні 3 с
+setInterval(updateTimestamp, 15000);  // «станом на» і ознаки зв'язку оновлюються й без нових даних

@@ -5,31 +5,18 @@
 (function () {
   const wrap = document.getElementById("mapwrap");
   if (!wrap) return;
-  if (typeof layersCtl !== "undefined") map.removeControl(layersCtl);   // старий список шарів Leaflet нам не потрібен
 
-  /* flat (вимкнено за замовчуванням) — плоска мапа як на офіційній (map.ukrainealarm.com): без підкладки, сірі області з назвами, райони в тривозі залиті суцільним кольором */
-  let ui = { flat: false, sat: false, labels: true, glow: true };
+  let ui = { labels: true, glow: true };
   try { Object.assign(ui, JSON.parse(localStorage.getItem("ui3") || "{}")); } catch (e) {}
   const save = () => { try { localStorage.setItem("ui3", JSON.stringify(ui)); } catch (e) {} };
-  window.uiFlat = () => !!ui.flat;
 
-  /* основа: плоска (за замовчуванням), інакше чиста темна схема або справжній супутник */
-  function applyBase() {
-    [satDarkLayer, satLayer, darkLayer, osmLayer].forEach(l => { if (map.hasLayer(l)) map.removeLayer(l); });
-    if (!ui.flat) (ui.sat ? satLayer : darkLayer).addTo(map).bringToBack();
-    document.getElementById("map").classList.toggle("flat", !!ui.flat);
-    if (typeof updateOblastStyles === "function") updateOblastStyles();
-    if (typeof lastPaintSig !== "undefined") { lastPaintSig = ""; if (typeof paintRaions === "function") paintRaions(); }
-  }
-  function applyLabels() { if (ui.labels) { if (!map.hasLayer(labelsUk)) map.addLayer(labelsUk); } else if (map.hasLayer(labelsUk)) map.removeLayer(labelsUk); }
+  function applyLabels() { if (ui.labels) { if (!map.hasLayer(labelsLayer)) map.addLayer(labelsLayer); } else if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer); }
   function applyGlow() { document.getElementById("map").classList.toggle("no-glow", !ui.glow); }
 
   const ROWS = [
     { id: "targets", label: "Цілі на карті", get: () => !!layerOn.targets, set: v => { layerOn.targets = v; applyLayers(); } },
     { id: "alerts", label: "Райони в тривозі", get: () => !!layerOn.alerts, set: v => { layerOn.alerts = v; applyLayers(); } },
     { id: "labels", label: "Назви населених пунктів", get: () => ui.labels, set: v => { ui.labels = v; save(); applyLabels(); } },
-    { id: "flat", label: "Плоска мапа (як офіційна)", get: () => ui.flat, set: v => { ui.flat = v; save(); applyBase(); } },
-    { id: "sat", label: "Супутникова мапа", get: () => ui.sat, set: v => { ui.sat = v; save(); applyBase(); } },
     { id: "glow", label: "Підвищена небезпека", get: () => ui.glow, set: v => { ui.glow = v; save(); applyGlow(); } },
     { id: "sound", label: "Звук тривоги", get: () => !!soundOn, set: () => document.getElementById("btnSound").click() }
   ];
@@ -45,7 +32,7 @@
   function renderPanel() {
     panel.innerHTML = ROWS.map(r =>
       `<label class="ctl-row" data-id="${r.id}"><span>${r.label}</span><span class="sw${r.get() ? " on" : ""}"><i></i></span></label>`).join("") +
-      `<div class="ctl-credit">Карти: Esri, Maxar, Earthstar Geographics, Google, OpenStreetMap · Leaflet · цілі: dimap.live</div>`;
+      `<div class="ctl-credit">Карта: Esri, © OpenStreetMap · Leaflet · тривоги: Ukraine Alarm · цілі: dimap.live</div>`;
     panel.querySelectorAll(".ctl-row").forEach(el => el.onclick = e => {
       e.preventDefault();
       const r = ROWS.find(x => x.id === el.dataset.id);
@@ -79,7 +66,7 @@
   setInterval(() => { if (!lg.hidden) renderLegend(); }, 5000);
   L.DomEvent.disableClickPropagation(lg); L.DomEvent.disableScrollPropagation(lg);
 
-  applyBase(); applyLabels();
+  applyLabels();
   applyGlow();
 })();
 

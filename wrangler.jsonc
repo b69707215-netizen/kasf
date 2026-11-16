@@ -11,7 +11,7 @@
   "triggers": { "crons": ["* * * * *"] },
   // сховище стану бота (хто вже був у радіусі); wrangler створює його автоматично при деплої
   // адреса Worker для автопідключення webhook (самолікування)
-  "vars": { "WORKER_URL": "https://kasf.ytda2505.workers.dev" },
+  "vars": { "WORKER_URL": "https://damih-havajsa.pp.ua" },
   "kv_namespaces": [{ "binding": "STATE" }],
   // стан бота (що вже оголошено) — у Durable Object: безкоштовні 100 000 записів/добу замість 1000 у KV
   "durable_objects": { "bindings": [{ "name": "BOT_STATE", "class_name": "BotState" }] },

@@ -1,16 +1,17 @@
 // Бот: попередження про цілі в радіусі 20–150 км від Павлограда і про повітряну тривогу в районі (Telegram).
 // Дані: цілі — dimap.live; тривоги — кілька джерел із запасними (src/sirens.js); балістика — канали (src/ballistic.js).
 // Назовні (у повідомленнях) джерело одне — «наша карта». Cron запускає це щохвилини, а всередині запуску
-// перевірки йдуть кожні 3 с майже всю хвилину — затримка з нашого боку ≤ ~5 с, між запусками пауз немає.
+// перевірки йдуть кожні 2 с майже всю хвилину — затримка з нашого боку ≤ ~4 с.
 import { ensureWebhook } from "./telegram.js";
+import { kv } from "./store.js";
 import { listUsers, HOME } from "./link.js";
 import { checkBallistic, ballisticText } from "./ballistic.js";
-import { fetchSirens, loadRaions, raionAt } from "./sirens.js";
+import { fetchSirens, geoOf, geoCached, seedGeo } from "./sirens.js";
 const SRC = "\n\nДжерело: наша карта — https://damih-havajsa.pp.ua/";   // єдина вказівка джерела в усіх повідомленнях
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
 const STALE_MS = 2 * 60 * 1000;   // ціль, не оновлена понад 2 хв, ігноруємо
-const PASS_EVERY_MS = 3 * 1000;   // пауза між перевірками всередині одного запуску
+const PASS_EVERY_MS = 2 * 1000;   // пауза між перевірками всередині одного запуску
 const CLEAR_DELAY_MS = 2 * 60 * 1000;   // «ВІДБІЙ» лише коли цілей немає 2 хв поспіль (проти «миготіння» на межі радіуса)
 const URGENT_MIN = 3;             // ціль летить на точку і долетить за ≤3 хв → термінове сповіщення зі звуком
 const RUN_MS = 52 * 1000;         // нові перевірки починаємо в перші 52 с хвилини — запуск завершується до наступного cron (без накладання й дублів), пауза між запусками ≈ 5–8 с
@@ -48,6 +49,7 @@ export function photoKind(type) {
   if (/shahed|geran|drone|uav|bpla/.test(type)) return "shahed";
   return "other";
 }
+const iconUrl = (env, name) => env.WORKER_URL ? env.WORKER_URL.replace(/\/+$/, "") + "/icons/bot/" + name + ".png" : null;
 const photoUrl = (env, list) => {
   const k = (list || []).map(t => photoKind(t.type)).find(Boolean);
   return k && env.WORKER_URL ? env.WORKER_URL.replace(/\/+$/, "") + "/icons/bot/" + k + ".png" : null;
@@ -67,7 +69,7 @@ export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RA
     const speed = t.speed || 0;
     const toward = speed > 20 && diff <= 35;
     out.push({
-      id: String(t.id), type: t.type, km: d, toward, lat: t.lat, lng: t.lng, brg: t.bearing || 0,
+      id: String(t.id), type: t.type, km: d, toward, lat: t.lat, lng: t.lng, brg: t.bearing || 0, seenAt: seen || 0,
       etaMin: toward ? Math.max(1, Math.round(d / speed * 60)) : null,
       from: side(bearingDeg(c.lat, c.lng, t.lat, t.lng)),
       course: Math.round(t.bearing || 0), speed: Math.round(speed)
@@ -78,31 +80,41 @@ export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RA
 
 /* Балістика: типи з потоку цілей (точні назви залежать від джерела, тому ловимо за ключовими словами; крилаті — ні) */
 const BALL_KM = 300;
+/* Нерухомі «цілі» типу FPV / авіація (швидкість ~0) — це мітки на карті (де помічено/базується), а не політ у радіусі: бот про них не пише,
+   щоб не лякати «ФПВ за 10 км», коли нічого не летить. Рухомі цілі й усі інші типи (шахед, ракета, КАБ…) — як і раніше. */
+export const isAlertable = t => (t.speed || 0) >= 5 || !/fpv|avia|plane|aircraft|tu-|su-/i.test(t.type || "");
 export const isBallisticType = t => /ballist|iskander|kinzhal|kn-?23|tochka|zircon|missile|rocket/i.test(t.type || "") && !/cruise|kalibr|kh-?\d|x-?\d/i.test(t.type || "");
 const DIRS = ["північ", "північний схід", "схід", "південний схід", "південь", "південний захід", "захід", "північний захід"];
 export function ballisticTargetText(list) {
   const lines = list.map(t =>
     ["Ракета / балістика — " + t.km.toFixed(0) + " км на " + t.from + " від " + CENTER.name + "а",
       "   " + t.speed + " км/год, курс " + t.course + "°"].join("\n"));
-  return "🚨 БАЛІСТИКА — ДЕ ЛЕТИТЬ\n\n" + lines.join("\n\n") + "\n\n" + "⚠️ Негайно в укриття!" + SRC;
+  return "🔴 БАЛІСТИКА — ДЕ ЛЕТИТЬ\n\n" + lines.join("\n\n") + "\n\n" + "⚠️ Негайно в укриття!" + SRC;
 }
-export const isUrgent =t => t.toward && t.etaMin != null && t.etaMin <= URGENT_MIN;
+export const isUrgent = t => t.toward && t.etaMin != null && t.etaMin <= URGENT_MIN;
 
 /* Один рядок про ціль: «Шахед — 8.9 км, на півночі від вас» */
 const targetLine = (t, who) => `${label(t.type)} — ${t.km.toFixed(1)} км, на ${t.from} від ${who}`;
 
 /* Текст для «домашнього» центру (Павлоград) */
 export function alertText(list, km = RADIUS_KM, total = list.length, thr = km) {
-  const lines = list.map(t => targetLine(t, CENTER.name + "а", CENTER.name));
-  const head = thr < km ? `🚨 ЦІЛЬ ЗБЛИЖАЄТЬСЯ — менше ${thr} км від ${CENTER.name}а` : `⚠️ ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${km} км)`;
+  const lines = list.map(t => targetLine(t, CENTER.name + "а"));
+  const head = thr < km ? `🔴 ЦІЛЬ ЗБЛИЖАЄТЬСЯ — менше ${thr} км від ${CENTER.name}а` : `🔴 ЗАГРОЗА БІЛЯ ${CENTER.name.toUpperCase()}А (до ${km} км)`;
   return `${head}\n\n${lines.join("\n\n")}${total > list.length ? `\n\nУсього в радіусі: ${total}` : ""}${SRC}`;
 }
-export const clearText = (km = RADIUS_KM) => `✅ ВІДБІЙ. В радіусі ${km} км від ${CENTER.name}а цілей більше немає.${SRC}`;
+/* «Відбій» по цілях. Якщо в районі ще триває офіційна повітряна тривога — НЕ пишемо «ВІДБІЙ» (це вводило в оману):
+   кажемо лише, що цілей у радіусі зараз немає, а тривога триває. */
+export const clearText = (km = RADIUS_KM, siren = false) => siren
+  ? `🟡 Цілей у радіусі ${km} км від ${CENTER.name}а зараз немає, але повітряна тривога в районі ще триває — залишайтесь в укритті.${SRC}`
+  : `🟣 ВІДБІЙ. В радіусі ${km} км від ${CENTER.name}а цілей більше немає.${SRC}`;
+export const userClearText = (km, siren = false) => siren
+  ? `🟡 Цілей у вашому радіусі ${km} км зараз немає, але повітряна тривога в районі ще триває — залишайтесь в укритті.${SRC}`
+  : `🟣 ВІДБІЙ. У вашому радіусі ${km} км цілей більше немає.${SRC}`;
 
 /* Текст для власної точки користувача (з карти або геолокації) */
 export function userAlertText(list, km, total = list.length, thr = km) {
-  const lines = list.map(t => targetLine(t, "вас", "вас"));
-  const head = thr < km ? `🚨 ЦІЛЬ ЗБЛИЖАЄТЬСЯ — менше ${thr} км від вас` : `⚠️ ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)`;
+  const lines = list.map(t => targetLine(t, "вас"));
+  const head = thr < km ? `🔴 ЦІЛЬ ЗБЛИЖАЄТЬСЯ — менше ${thr} км від вас` : `🔴 ЦІЛІ В ВАШОМУ РАДІУСІ (${km} км)`;
   return `${head}\n\n${lines.join("\n\n")}${total > list.length ? `\n\nУсього в радіусі: ${total}` : ""}${SRC}`;
 }
 
@@ -128,16 +140,17 @@ async function sendOne(env, chat_id, text, loud = true, photo = null) {
 const DELETE_AFTER_MS = 30 * 60 * 1000;
 const keepIds = (arr, id) => (id ? [...(arr || []), { id, t: Date.now() }] : [...(arr || [])]).slice(-100);
 async function sweep(env, chat_id, arr) {
-  const now = Date.now(), keep = [];
+  const now = Date.now(), keep = [], old = [];
   for (const m of arr || []) {
     if (!m || typeof m !== "object") continue;   // старий формат (просто id) відкидаємо
-    if (now - m.t < DELETE_AFTER_MS) { keep.push(m); continue; }
-    await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ chat_id, message_id: m.id })
-    }).catch(() => {});
+    (now - m.t < DELETE_AFTER_MS ? keep : old).push(m);
   }
-  return keep;
+  /* видаляємо паралельно й не більше 5 за раз: довга черга послідовних видалень раніше затримувала й самі сповіщення */
+  await Promise.all(old.slice(0, 5).map(m => fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id, message_id: m.id })
+  }).catch(() => {})));
+  return [...keep, ...old.slice(5)];   // решта — наступного разу
 }
 
 /* ==================== Антиспам: пороги відстані ====================
@@ -173,7 +186,8 @@ export function decide(list, S, tiers, now) {
     else if (now - emptyAt >= CLEAR_DELAY_MS) { clear = true; out = {}; emptyAt = 0; }
   }
   let send = fresh.length > 0;
-  if (send && now - (S.lastSent || 0) < MIN_GAP_MS) {         // занадто швидко після попереднього — відкладаємо: ці цілі лишаються «неоголошеними»
+  const urgent = fresh.some(x => x.k >= 1);                   // ціль уже ближче 10 км — пауза не діє, повідомляємо одразу
+  if (send && !urgent && now - (S.lastSent || 0) < MIN_GAP_MS) {         // занадто швидко після попереднього — відкладаємо: ці цілі лишаються «неоголошеними»
     send = false;
     out = { ...out };
     for (const { t } of fresh) { if (seen[t.id]) out[t.id] = seen[t.id]; else delete out[t.id]; }
@@ -182,63 +196,77 @@ export function decide(list, S, tiers, now) {
 }
 const maxTier = fresh => fresh.reduce((m, x) => Math.max(m, x.k), 0);
 
-/* ==================== Сховище стану: Durable Object (замість KV) ====================
-   KV на безкоштовному тарифі: 1000 записів і 1000 «list» на добу. Бот писав у нього щохвилини й вичерпував ліміт —
-   після цього не міг запам'ятати, що вже оголосив: мовчав або повторював. Тут стан живе в Durable Object (src/botstate.js),
-   у KV лишаються лише рідкісні налаштування (підписники, радіуси користувачів). */
-let DB = null, SUBS = [];
+/* ==================== Сховище: Durable Object (замість KV) ====================
+   KV на безкоштовному тарифі: 1000 записів і 1000 «list» на добу. Бот вичерпував ліміт — потім не міг ні запам'ятати оголошене,
+   ні зберегти радіус, код для карти, геолокацію. Тепер і стан, і налаштування живуть в Durable Object (src/botstate.js, src/store.js):
+   без добових лімітів і з миттєво свіжим читанням. */
+let DB = null, SUBS = [], ACTIVE_SIRENS = new Set();
+/* район і область Павлограда — константи (перевірено за межами з ukraine.json), без завантаження меж */
+const HOME_GEO = { r: "Павлоградський район", o: "Дніпропетровська область" };
+const HOME_RAION = HOME_GEO.r;
+seedGeo(CENTER.lat, CENTER.lng, HOME_GEO);
 const dumpOf = o => JSON.stringify(o);
+const DUMPS = new Map();       // chat → останній записаний знімок стану користувача (щоб не писати без змін)
 
-/* Підписники й користувачі з KV — кеш у DO: підписники оновлюються раз на 30 с, список користувачів раз на 150 с.
-   Якщо KV недоступний (ліміт, збій) — працюємо зі збереженим кешем, а не з порожнім списком. */
-async function loadConfig(env) {
-  const now = Date.now();
-  const c = (await DB.get("cfg")) || { subs: [], users: [], subsAt: 0, usersAt: 0 };
-  let changed = false;
-  if (now - c.subsAt > 30000) {
-    try { const a = JSON.parse((await env.STATE.get("subs")) || "[]"); c.subs = Array.isArray(a) ? a.map(String) : []; c.subsAt = now; changed = true; }
-    catch (e) { console.log("subs refresh failed:", e && e.message); }
-  }
-  if (now - c.usersAt > 150000) {
-    try { c.users = await listUsers(env); c.usersAt = now; changed = true; }
-    catch (e) { console.log("users refresh failed:", e && e.message); }
-  }
-  if (changed) await DB.put("cfg", c).catch(e => console.log("cfg save failed:", e && e.message));
-  return c;
+/* Підписники й користувачі — напряму з сховища (без кешу): зміни радіуса/точки підхоплюються за ~15 с */
+async function loadConfig(env, prev) {
+  const s = kv(env);
+  let subs = prev ? prev.subs : [], users = prev ? prev.users : [];
+  try { const a = JSON.parse((await s.get("subs")) || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
+  catch (e) { console.log("subs load failed:", e && e.message); }
+  try { users = await listUsers(env); }
+  catch (e) { console.log("users load failed:", e && e.message); }
+  return { subs, users };
 }
-const sigOf = u => `${u.lat},${u.lng},${u.km}`;
+/* Стан тільки від радіуса (пороги залежать від km). Змінився радіус — скидаємо «оголошене», тож цілі, що вже в новому радіусі, буде оголошено одразу.
+   Точка (геолокація) у підписі немає: «жива» геолокація, що рухається, не повинна обнуляти стан. */
+const sigOf = u => String(u.km);
+function attachDyn(list, dynStore) {
+  return list.map(u => {
+    const sig = sigOf(u);
+    let dd = dynStore.get(u.chat);
+    if (!dd) dd = { sig };                              // зовсім новий чат — перший прохід лише запам'ятає цілі, без розсилки
+    else if (dd.sig !== sig) { dd = { sig, seen: {}, msgs: dd.msgs }; DUMPS.delete(u.chat); }   // змінили радіус — оголошуємо поточні цілі
+    dynStore.set(u.chat, dd);
+    return { ...u, dyn: dd };
+  });
+}
 async function saveDyn(u) {
   u.dyn.sig = sigOf(u);
   const d = dumpOf(u.dyn);
-  if (d === u._dyn) return;
+  if (d === DUMPS.get(u.chat)) return;
   await DB.put("ud:" + u.chat, u.dyn);
-  u._dyn = d;
+  DUMPS.set(u.chat, d);
 }
 
-/* Індивідуальні налаштування (власна точка або змінений радіус від Павлограда) */
+/* Індивідуальні налаштування (власна точка або змінений радіус від Павлограда): користувачі обробляються паралельно */
 async function passUsers(env, users, targets) {
   const now = Date.now();
-  for (const u of users) {
-    const km = u.km, tiers = tiersFor(km);
-    const list = nearTargets(targets, now, { lat: u.lat, lng: u.lng }, km);
-    const S = u.dyn;
-    if (!S.seen) {   // перший запуск для цього чату (або змінили точку/радіус): запам'ятовуємо поточні цілі без розсилки
-      S.seen = Object.fromEntries(list.map(t => [t.id, { k: tierOf(t.km, tiers), t: now }]));
-      await saveDyn(u); continue;
-    }
-    const d = decide(list, S, tiers, now);
-    S.seen = d.seen; S.emptyAt = d.emptyAt;
-    let msg = null, loud = true, photo = null;
-    if (d.send) {
-      const fr = d.fresh.map(x => x.t), thr = tiers[maxTier(d.fresh)];
-      msg = u.home ? alertText(fr, km, list.length, thr) : userAlertText(fr, km, list.length, thr);
-      photo = photoUrl(env, fr); S.lastSent = now;
-    } else if (d.clear) { msg = u.home ? clearText(km) : `✅ ВІДБІЙ. У вашому радіусі ${km} км цілей більше немає.${SRC}`; loud = false; }
-    if (msg) await saveDyn(u);                                    // фіксуємо стан ДО відправки (проти дублів)
-    S.msgs = await sweep(env, u.chat, S.msgs);
-    if (msg) { const id = await sendOne(env, u.chat, msg, loud, photo); S.msgs = keepIds(S.msgs, id); }
-    await saveDyn(u);
+  await Promise.all(users.map(u => passUser(env, u, targets, now).catch(e => console.log("user pass error", u.chat, e && e.message))));
+}
+async function passUser(env, u, targets, now) {
+  const km = u.km, tiers = tiersFor(km);
+  const list = nearTargets(targets, now, { lat: u.lat, lng: u.lng }, km);
+  const S = u.dyn;
+  if (!S.seen) {   // перший запуск для цього чату: запам'ятовуємо поточні цілі без розсилки
+    S.seen = Object.fromEntries(list.map(t => [t.id, { k: tierOf(t.km, tiers), t: now }]));
+    await saveDyn(u); return;
   }
+  const d = decide(list, S, tiers, now);
+  S.seen = d.seen; S.emptyAt = d.emptyAt;
+  let msg = null, loud = true, photo = null;
+  if (d.send) {
+    const fr = d.fresh.map(x => x.t), thr = tiers[maxTier(d.fresh)];
+    msg = u.home ? alertText(fr, km, list.length, thr) : userAlertText(fr, km, list.length, thr);
+    photo = photoUrl(env, fr); S.lastSent = now;
+  } else if (d.clear) {
+    const g = geoCached(u.lat, u.lng), siren = !!(g && ACTIVE_SIRENS.has(g.r));
+    msg = u.home ? clearText(km, siren) : userClearText(km, siren); loud = false; photo = iconUrl(env, siren ? "alarm" : "clear");
+  }
+  if (msg) await saveDyn(u);                                    // фіксуємо стан ДО відправки (проти дублів)
+  if (msg) { const id = await sendOne(env, u.chat, msg, loud, photo); S.msgs = keepIds(S.msgs, id); }
+  S.msgs = await sweep(env, u.chat, S.msgs);                    // видалення старих — після відправки, щоб не затримувати сповіщення
+  await saveDyn(u);
 }
 
 /* Стандартні чати без своїх налаштувань: особисті — Павлоград 20 км, групи й канали — Павлоград 10 км */
@@ -258,14 +286,19 @@ async function sirenPass(env, st, users, save) {
   if (sirenTick++ % 2) return st;   // джерела тривог опитуємо раз на 6 с (кожна друга перевірка), щоб не навантажувати їхнє API
   const s = await fetchSirens(env);
   if (!s) return st;   // жодне джерело не відповіло — нічого не вирішуємо
-  const home = raionAt(CENTER.lat, CENTER.lng);
-  const userRaion = new Map();
-  for (const u of users) { const r = raionAt(u.lat, u.lng); if (r) userRaion.set(u.chat, r); }
-  const watched = new Set([home, ...userRaion.values()].filter(Boolean));
-  const now = [...watched].filter(r => s.areas.has(r));
+  /* район чату → його область: тривога на всю область (Ukraine Alarm тоді не перелічує райони) теж рахується тривогою в районі */
+  const home = HOME_GEO.r;
+  const userRaion = new Map(), oblOf = new Map([[home, HOME_GEO.o]]);
+  for (const u of users) {
+    const g = await geoOf(env, DB, u.lat, u.lng);
+    if (g && g.r) { userRaion.set(u.chat, g.r); if (!oblOf.has(g.r)) oblOf.set(g.r, g.o); }
+  }
+  const watched = new Set(oblOf.keys());
+  const active = r => s.areas.has(r) || (oblOf.get(r) && s.areas.has(oblOf.get(r)));
+  const now = [...watched].filter(active);
   if (!Array.isArray(st.sirens)) return { ...st, sirens: now };   // перший запуск: запам'ятовуємо поточні тривоги без розсилки
   const was = new Set(st.sirens);
-  const started = now.filter(r => !was.has(r)), ended = [...was].filter(r => watched.has(r) && !s.areas.has(r));
+  const started = now.filter(r => !was.has(r)), ended = [...was].filter(r => watched.has(r) && !active(r));
   st = { ...st, sirens: now, msgs: { ...(st.msgs || {}) } };
   if (!started.length && !ended.length) return st;
   await save(st);   // спершу фіксуємо стан, потім розсилаємо (проти дублів)
@@ -273,10 +306,10 @@ async function sirenPass(env, st, users, save) {
   const defChats = [...defaults.private, ...defaults.group];
   const events = [...started.map(r => [r, true]), ...ended.map(r => [r, false])];
   for (const [r, on] of events) {
-    const text = (on ? "🔔 ПОВІТРЯНА ТРИВОГА\n" : "✅ ВІДБІЙ ТРИВОГИ\n") + r + SRC;
-    if (r === home) await inBatches(defChats, async c => { const id = await sendOne(env, c, text, on); if (id) st.msgs[c] = keepIds(st.msgs[c], id); });
+    const text = (on ? "🔴 ПОВІТРЯНА ТРИВОГА\n" : "🟣 ВІДБІЙ ТРИВОГИ\n") + r + SRC;
+    if (r === home) await inBatches(defChats, async c => { const id = await sendOne(env, c, text, on, iconUrl(env, on ? "alarm" : "clear")); if (id) st.msgs[c] = keepIds(st.msgs[c], id); });
     for (const u of users) if (userRaion.get(u.chat) === r) {
-      const id = await sendOne(env, u.chat, text, on).catch(() => null);
+      const id = await sendOne(env, u.chat, text, on, iconUrl(env, on ? "alarm" : "clear")).catch(() => null);
       if (id) { u.dyn.msgs = keepIds(u.dyn.msgs, id); await saveDyn(u).catch(() => {}); }
     }
   }
@@ -284,28 +317,45 @@ async function sirenPass(env, st, users, save) {
 }
 
 /* Одна перевірка. st.seen[cls] — про які цілі й на якому порозі вже повідомили (окремо для особистих і груп). */
+/* Якщо dimap віддав рівно те саме, що минулого разу, — цілі не перераховуємо (економія процесора й записів),
+   але не довше 10 с: «відбій» через 2 хв і відсів застарілих цілей залежать від часу, а не лише від даних. */
+const SAME_SKIP_MS = 10 * 1000;
+let lastDimap = "", lastFull = 0;
 async function pass(env, st, users, save) {
-  let data = null;
+  let data = null, same = false;
   try {
     const r = await fetch("https://api.dimap.live/api/targets", { headers: { "User-Agent": "radf4-pavlohrad-bot" }, signal: AbortSignal.timeout(4000) });
-    if (r.ok) { const j = await r.json(); if (Array.isArray(j.targets)) data = j; } else console.log("dimap http", r.status);
+    if (r.ok) {
+      const txt = await r.text();
+      same = txt === lastDimap && Date.now() - lastFull < SAME_SKIP_MS;
+      const j = same ? null : JSON.parse(txt);
+      if (same || Array.isArray(j.targets)) { data = j; lastDimap = txt; }
+    } else console.log("dimap http", r.status);
   } catch (e) { console.log("dimap error", e && e.message); }
-  st = await health(env, st, users, !!data);
+  const ok = !!(data || same);
+  st = await health(env, st, users, ok);
   st = await sirenPass(env, st, users, save).catch(e => { console.log("siren pass error", e && e.message); return st; });   // тривоги — незалежно від dimap
-  if (!data) return st;   // джерело цілей недоступне — цілі не вирішуємо
-  await passUsers(env, users, data.targets).catch(e => console.log("users pass error", e && e.message));
+  ACTIVE_SIRENS = new Set(Array.isArray(st.sirens) ? st.sirens : []);   // де зараз офіційна тривога: «відбій» по цілях не вводить в оману
+  if (!ok) return st;     // джерело цілей недоступне — цілі не вирішуємо
+  if (same) return st;   // дані ті самі, що секунди тому — нічого нового
+  lastFull = Date.now();
+  const tg = data.targets.filter(isAlertable);
+  const usersJob = passUsers(env, users, tg).catch(e => console.log("users pass error", e && e.message));   // паралельно зі стандартними чатами
   const chats = await defaultChats(env, users);
   const now = Date.now();
   const next = { ...st, seen: { ...(st.seen || {}) }, empty: { ...(st.empty || {}) }, lastSent: { ...(st.lastSent || {}) }, msgs: { ...(st.msgs || {}) } };
   for (const cls of ["private", "group"]) {
     const km = DEFAULT_KM[cls], tiers = tiersFor(km);
-    const list = nearTargets(data.targets, now, CENTER, km);
+    const list = nearTargets(tg, now, CENTER, km);
     if (!next.seen[cls]) { next.seen[cls] = Object.fromEntries(list.map(t => [t.id, { k: tierOf(t.km, tiers), t: now }])); continue; }   // перший запуск — без розсилки
     const d = decide(list, { seen: next.seen[cls], emptyAt: next.empty[cls], lastSent: next.lastSent[cls] }, tiers, now);
     next.seen[cls] = d.seen; if (d.emptyAt) next.empty[cls] = d.emptyAt; else delete next.empty[cls];
     let msg = null, loud = true, photo = null;
-    if (d.send) { const fr = d.fresh.map(x => x.t); msg = alertText(fr, km, list.length, tiers[maxTier(d.fresh)]); photo = photoUrl(env, fr); next.lastSent[cls] = now; }
-    else if (d.clear) { msg = clearText(km); loud = false; }
+    if (d.send) {
+      const fr = d.fresh.map(x => x.t); msg = alertText(fr, km, list.length, tiers[maxTier(d.fresh)]); photo = photoUrl(env, fr); next.lastSent[cls] = now;
+      const seenMin = Math.min(...fr.map(t => t.seenAt || now));   // затримка: від останнього оновлення цілі в dimap до нашого рішення
+      next.stats = { ...(next.stats || {}), alertLagSec: Math.round((now - seenMin) / 1000), alertAt: now };
+    } else if (d.clear) { const siren = ACTIVE_SIRENS.has(HOME_RAION); msg = clearText(km, siren); loud = false; photo = iconUrl(env, siren ? "alarm" : "clear"); }
     if (msg) {
       await save(next);   // спершу фіксуємо стан, потім розсилаємо (проти дублів)
       await inBatches(chats[cls], async c => {
@@ -315,7 +365,7 @@ async function pass(env, st, users, save) {
     }
   }
   /* Балістика з потоку цілей: де летить — усім підписникам; про кожну ціль один раз */
-  const bl = nearTargets((data.targets || []).filter(isBallisticType), now, CENTER, BALL_KM);
+  const bl = nearTargets(tg.filter(isBallisticType), now, CENTER, BALL_KM);
   const bTags = bl.map(t => t.id);
   const prevB = st.ballT || [];
   next.ballT = bTags.length ? [...new Set([...bTags, ...prevB.filter(x => bTags.includes(x))])] : [];
@@ -325,10 +375,11 @@ async function pass(env, st, users, save) {
     const bPhoto = env.WORKER_URL ? env.WORKER_URL.replace(/\/+$/, "") + "/icons/bot/missile.png" : null;
     await inBatches(all, c => sendOne(env, c, ballisticTargetText(bl), true, bPhoto));
   }
-  for (const c of Object.keys(next.msgs)) {   // видаляємо повідомлення старші за 30 хв
+  await Promise.all(Object.keys(next.msgs).map(async c => {   // видаляємо повідомлення старші за 30 хв (паралельно)
     const left = await sweep(env, c, next.msgs[c]);
     if (left.length) next.msgs[c] = left; else delete next.msgs[c];
-  }
+  }));
+  await usersJob;   // особисті налаштування оброблялись паралельно з розсилкою вище
   return next;
 }
 
@@ -388,15 +439,13 @@ export async function run(env) {
       ballT: Array.isArray(raw.ballT) ? raw.ballT : [], down: +raw.down || 0, downSent: !!raw.downSent, sirens: Array.isArray(raw.sirens) ? raw.sirens : null,
       seen: raw.seen && typeof raw.seen === "object" ? raw.seen : undefined, empty: raw.empty || {}, lastSent: raw.lastSent || {} };
   } catch (e) { console.log("state load failed:", e && e.message); return; }   // без стану не діємо: краще пропустити запуск, ніж розіслати дублі
-  const cfg = await loadConfig(env);
+  let cfg = await loadConfig(env, null);
   SUBS = cfg.subs;
   let dyn = {};
   try { dyn = await DB.list("ud:"); } catch (e) { console.log("user state load failed:", e && e.message); }
-  const users = (cfg.users || []).map(u => {
-    const d = dyn["ud:" + u.chat];
-    const dd = d && d.sig === sigOf(u) ? d : { sig: sigOf(u) };
-    return { ...u, dyn: dd, _dyn: d && d.sig === sigOf(u) ? dumpOf(d) : "" };
-  });
+  const dynStore = new Map();
+  for (const [k, v] of Object.entries(dyn)) { dynStore.set(k.slice(3), v); DUMPS.set(k.slice(3), dumpOf(v)); }
+  let users = attachDyn(cfg.users || [], dynStore);
   let last = dumpOf(st);
   if (minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
   /* Записуємо стан (лише зміни). Викликається і ПЕРЕД відправкою повідомлень: якщо запуск обірветься
@@ -407,11 +456,13 @@ export async function run(env) {
     await DB.put("st", s);
     last = dump;
   };
-  await loadRaions(env);
   const t0 = Date.now();
   let passes = 0, errors = 0;
   for (let i = 0; ; i++) {
     if (i) { await sleep(PASS_EVERY_MS); if (Date.now() - t0 > RUN_MS) break; }
+    if (i && i % 5 === 0) {   // кожні ~15 с перечитуємо підписників і налаштування (радіус/точку/код змінили в боті чи на карті)
+      try { cfg = await loadConfig(env, cfg); SUBS = cfg.subs; users = attachDyn(cfg.users || [], dynStore); } catch (e) { console.log("config reload failed:", e && e.message); }
+    }
     passes++;
     try {
       st = await pass(env, st, users, save);
@@ -422,7 +473,7 @@ export async function run(env) {
   /* «пульс» для /bot-status: коли бот працював востаннє, скільки перевірок, помилок і про скільки цілей пам'ятає */
   const cnt = o => Object.keys(o || {}).length;
   await DB.put("health", { at: Date.now(), ms: Date.now() - t0, passes, errors, subs: SUBS.length, users: users.length,
-    seen: { private: cnt(st.seen && st.seen.private), group: cnt(st.seen && st.seen.group) }, sirens: Array.isArray(st.sirens) ? st.sirens.length : null }).catch(() => {});
+    seen: { private: cnt(st.seen && st.seen.private), group: cnt(st.seen && st.seen.group) }, sirens: Array.isArray(st.sirens) ? st.sirens.length : null, stats: st.stats || null }).catch(() => {});
 }
 export async function botStatus(env) {
   if (!env.BOT_STATE) return { error: "no BOT_STATE" };

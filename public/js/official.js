@@ -1,7 +1,7 @@
 "use strict";
 /* ==================== Офіційний шар тривог (3 джерела з фолбеком) ==================== */
-/* 1) alerts.com.ua (безкоштовний API) → 2) ubilling.net.ua → 3) офіційні TG-канали */
-const OFFICIAL_TG = ["air_raid_alert_ua", "povitryana_tryvoha"];
+/* 1) Ukraine Alarm (офіційне API) → 2) alerts.in.ua (офіційне API) → 3) відкрита карта map.ukrainealarm.com.
+   alerts.com.ua (закрився), ubilling (неофіційне дзеркало) і розбір TG-постів прибрано — саме вони давали хибні тривоги. */
 const lastOfficialAlert = {};   // key -> попередній офіційний стан (для реакції звуку)
 
 /* реакція на зміну офіційної тривоги: сирена УВІМК / відбій */
@@ -29,91 +29,16 @@ async function refreshOfficial() {
   const box = $("official");
   let rows = null;
 
-  // джерело 00: офіційне API Ukraine Alarm (ключ у секреті Worker) — області, де тривога на весь регіон
-  try {
-    const r = await fetch("/ua-alerts", { signal: AbortSignal.timeout(6000) });
-    if (r.ok) {
-      const list = await r.json();
-      if (Array.isArray(list)) {
-        rows = {};
-        OBLASTS.forEach(o => {
-          const names = [o.name, ...(o.alt || [])];
-          const hit = list.find(x => x.regionType === "State" && names.includes(x.regionName) && (x.activeAlerts || []).some(a => a.type === "AIR"));
-          const air = hit && hit.activeAlerts.find(a => a.type === "AIR");
-          rows[o.key] = { alert: !!hit, changed: hit ? ((air.activeAlertLevels && air.activeAlertLevels[0] && air.activeAlertLevels[0].createdAt) || air.lastUpdate) : null };
-        });
-        officialSource = "Ukraine Alarm (офіційне API)";
-      }
-    }
-  } catch (e) { rows = null; }
-
-  // джерело 0: ОФІЦІЙНЕ API alerts.in.ua (потрібен токен у файлі alerts_token.txt)
-  if (!rows) try {
-    const r = await fetch("/alerts", { signal: AbortSignal.timeout(6000) });
-    if (r.ok) {
-      const j = await r.json();
-      const act = (j.alerts || []).filter(x => x.alert_type === "air_raid" && !x.finished_at);
-      rows = {};
-      OBLASTS.forEach(o => {
-        const names = [o.name, ...(o.alt || [])];
-        const a = act.filter(x => names.includes(x.location_oblast));
-        rows[o.key] = { alert: a.length > 0, changed: a.length ? a[0].started_at : null };
-      });
-      officialSource = "alerts.in.ua (офіційне API)";
-    }
-  } catch (e) { rows = null; }
-
-  // джерело 1: alerts.com.ua
-  let raw = rows ? null : await fetchViaProxy("https://alerts.com.ua/api/states");
-  if (raw) {
-    try {
-      const j = JSON.parse(raw);
-      rows = {};
-      OBLASTS.forEach(o => {
-        const s = (j.states || []).find(x => x.name.startsWith(o.name.slice(0, 12)));
-        if (s) rows[o.key] = { alert: !!s.alert, changed: s.changed };
-      });
-      if (Object.keys(rows).length) officialSource = "alerts.com.ua"; else rows = null;
-    } catch (e) { rows = null; }
-  }
-
-  // джерело 2: ubilling.net.ua
-  if (!rows) {
-    raw = await fetchViaProxy("https://ubilling.net.ua/aerialalerts/");
-    if (raw) {
-      try {
-        const j = JSON.parse(raw);
-        rows = {};
-        OBLASTS.forEach(o => {
-          const k = Object.keys(j.states || {}).find(k => k.startsWith(o.name.slice(0, 12)));
-          if (k) rows[o.key] = { alert: !!j.states[k].alertnow, changed: j.states[k].changed };
-        });
-        if (Object.keys(rows).length) officialSource = "ubilling.net.ua"; else rows = null;
-      } catch (e) { rows = null; }
-    }
-  }
-
-  // джерело 3: офіційні TG-канали (останній пост по області за 3 години)
-  if (!rows) {
+  /* Області: лише записи рівня «область» з обох офіційних джерел (тривога в одному районі не фарбує всю область) */
+  const merged = await fetchMergedAlerts();
+  if (merged) {
     rows = {};
-    const cutoff = Date.now() - 3 * 3600 * 1000;
-    const last = {};
-    for (const c of OFFICIAL_TG) {
-      const html = await fetchViaProxy("https://t.me/s/" + c, t => t.includes("tgme_widget_message"));
-      if (!html) continue;
-      parseMessages(html).forEach(m => {
-        if (m.t < cutoff || !m.txt) return;
-        const low = m.txt.toLowerCase();
-        OBLASTS.forEach(o => {
-          if (!o.stems.some(v => low.includes(v))) return;
-          const isClear = RE_CLEAR.test(m.txt);
-          const isAlert = /(тривог|тревог)/i.test(m.txt) && !isClear;
-          if (isAlert || isClear) last[o.key] = { alert: isAlert, t: m.t };
-        });
-      });
-    }
-    OBLASTS.forEach(o => { if (last[o.key]) rows[o.key] = { alert: last[o.key].alert, changed: new Date(last[o.key].t).toISOString() }; });
-    officialSource = Object.keys(rows).length ? "TG: " + OFFICIAL_TG.join(", ") : "";
+    OBLASTS.forEach(o => {
+      const names = [o.name, ...(o.alt || [])];
+      const hit = merged.list.find(x => x.level === "oblast" && x.color === "red" && names.includes(x.region));
+      rows[o.key] = { alert: !!hit, changed: hit && hit.since ? new Date(hit.since).toISOString() : null, srcs: hit ? hit.srcs : [] };
+    });
+    officialSource = merged.sources.join(" + ");
   }
 
   if (rows && Object.keys(rows).length) {
@@ -127,7 +52,7 @@ async function refreshOfficial() {
       // джерело офлайн, але тривога ще не відбита → тримаємо на карті
       if (off === undefined) {
         return stickyAlert[o.key]
-          ? `🔴 <b>${short}</b> — ТРИВОГА <span style="color:#ffb0b0">(джерело офлайн, тримається до відбою)</span>`
+          ? `🔴 <b>${short}</b> — ТРИВОГА <span style="color:#ffb0b0">(джерело офлайн — останній відомий стан)</span>`
           : null;
       }
       const changed = rows[o.key] && rows[o.key].changed ? new Date(rows[o.key].changed) : null;
@@ -149,14 +74,14 @@ async function refreshOfficial() {
     /* Джерело офлайн: попереджаємо, але тривогу НЕ знімаємо —
        вона тримається на карті, поки API прямо не скаже "відбій" */
     const heldLines = OBLASTS.filter(o => stickyAlert[o.key]).map(o =>
-      `🔴 <b>${o.name.replace(" область", "")}</b> — ТРИВОГА <span style="color:#ffb0b0">(джерело офлайн, тримається до відбою)</span>`
+      `🔴 <b>${o.name.replace(" область", "")}</b> — ТРИВОГА <span style="color:#ffb0b0">(джерело офлайн — останній відомий стан)</span>`
     );
-    box.innerHTML = "⚠ ОФІЦІЙНІ ДАНІ НЕДОСТУПНІ — стан сирени невідомий (спроба за хвилину)" +
+    box.innerHTML = "⚠ ОФІЦІЙНІ ДАНІ НЕДОСТУПНІ — стан сирени невідомий (повтор за кілька секунд)" +
       (heldLines.length ? "<br>" + heldLines.join("<br>") : "");
     officialSource = "";
     const om = $("officialMini");
     if (om) om.innerHTML = heldLines.length
-      ? "⚠ Офіційно: джерело офлайн — тривога тримається до відбою"
+      ? "⚠ Офіційно: джерело офлайн — показано останній відомий стан"
       : "⚠ Офіційно: сирена невідома (джерело недоступне)";
   }
   recomputeOblastStates();

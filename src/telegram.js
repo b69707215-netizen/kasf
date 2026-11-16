@@ -3,6 +3,7 @@
 // Підписники зберігаються в KV (ключ "subs"); сповіщення про цілі йдуть усім підписникам.
 
 import { issueCode, unlink, setRadiusFromBot, setLocationFromBot, setHomeFromBot } from "./link.js";
+import { kv } from "./store.js";
 
 export async function tgApi(env, method, body) {
   if (body && body.reply_markup && Number(body.chat_id) < 0) body = { ...body, reply_markup: undefined };   // у групах кнопок-клавіатури немає
@@ -13,26 +14,29 @@ export async function tgApi(env, method, body) {
 }
 
 export async function getSubs(env) {
-  if (!env.STATE) return [];
-  try { const a = JSON.parse((await env.STATE.get("subs")) || "[]"); return Array.isArray(a) ? a.map(String) : []; }
+  if (!kv(env)) return [];
+  try { const a = JSON.parse((await kv(env).get("subs")) || "[]"); return Array.isArray(a) ? a.map(String) : []; }
   catch { return []; }
 }
 /* true — збережено; false — сховище не прийняло (напр. вичерпано добовий ліміт KV) → не вдаємо, що підписали */
 async function setSubs(env, arr) {
-  if (!env.STATE) return false;
-  try { await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); return true; }
+  if (!kv(env)) return false;
+  try { await kv(env).put("subs", JSON.stringify([...new Set(arr)])); return true; }
   catch (e) { console.log("subs save failed:", e && e.message); return false; }
 }
 
 const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
   "і напишу «відбій», коли небезпека мине.\n\n📏 «Радіус» — змінити радіус (до 150 км).\n" +
   "📍 «Моя геолокація» — поставити свою точку замість Павлограда (один раз; для постійної — «Поділитися геопозицією» через 📎).\n" +
-  "🔗 «Код для карти» — підключити карту.\n\nЩоб відписатися — /stop";
+  "🗺 «Відкрити карту» — карта прямо в Telegram.\n\nЩоб відписатися — /stop";
 const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сюди про цілі в радіусі 10 км від Павлограда і «відбій», коли небезпека мине.\n\n" +
   "Радіус для групи: /radius 50 (будь-який від 5 до 150 км).\n" +
   "Свій центр замість Павлограда: /code — код для карти (введіть його на карті); /home — назад до Павлограда.\n" +
   "Якщо бот не бачить команд — зробіть його адміністратором групи. Зупинити — /stop";
-const KEYBOARD = { keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }], [{ text: "🔗 Код для карти" }]], resize_keyboard: true, is_persistent: true };
+/* Кнопка «Відкрити карту» відкриває карту прямо в Telegram (веб-додаток; лише в особистих чатах). Адреса — з WORKER_URL. */
+const mapUrl = env => (env.WORKER_URL || "").replace(/\/+$/, "") + "/";
+const keyboard = env => ({ keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }],
+  [env.WORKER_URL ? { text: "🗺 Відкрити карту", web_app: { url: mapUrl(env) } } : { text: "🗺 Відкрити карту" }]], resize_keyboard: true, is_persistent: true });
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
   [{ text: "📏 150 км" }, { text: "🏠 Павлоград" }, { text: "← Назад" }]], resize_keyboard: true };
 const BYE = "Добре, більше не надсилатиму. Щоб повернутись — /start";
@@ -63,7 +67,7 @@ export async function handleWebhook(request, env) {
   if (m.location) {   // геолокація з Telegram → центр радіуса (без карти)
     const km = await setLocationFromBot(env, String(m.chat.id), m.location.latitude, m.location.longitude, live);
     if (live) return new Response("ok");   // тихе оновлення «живої» точки — без повідомлень
-    await tgApi(env, "sendMessage", { chat_id: m.chat.id, reply_markup: KEYBOARD, text: km
+    await tgApi(env, "sendMessage", { chat_id: m.chat.id, reply_markup: keyboard(env), text: km
       ? `✅ Центр радіуса — ваша геолокація, радіус ${km} км. Змінити радіус — кнопка «📏 Радіус» (до 150 км). Бот сповіщатиме про цілі навколо вас.` +
         (m.location.live_period ? "\n\n🔴 Жива геолокація ввімкнена — центр рухається разом із вами." : "\n\nЩоб центр рухався за вами: скріпка 📎 → Геопозиція → «Поділитися геопозицією» (на 8 годин).")
       : "Не вдалося зберегти геолокацію, спробуйте пізніше." });
@@ -75,13 +79,13 @@ export async function handleWebhook(request, env) {
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
     const saved = subs.includes(chat) || await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
-    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD,
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env),
       text: saved ? (Number(chat) < 0 ? GROUP_HELLO : HELLO) : "⚠️ Не вдалося зберегти підписку (тимчасовий збій сховища). Надішліть /start ще раз за кілька хвилин." });
   } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
     const km = await setHomeFromBot(env, chat);
-    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env), text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
   } else if (text === "← назад") {
-    await tgApi(env, "sendMessage", { chat_id: chat, text: "Ок.", reply_markup: KEYBOARD });
+    await tgApi(env, "sendMessage", { chat_id: chat, text: "Ок.", reply_markup: keyboard(env) });
   } else if (/^(\/radius|📏)/.test(text)) {
     const n = text.match(/(\d{1,4})/);
     if (!n) {
@@ -90,11 +94,13 @@ export async function handleWebhook(request, env) {
       const res = await setRadiusFromBot(env, chat, +n[1]);
       const msg = res === "range" ? "Радіус має бути від 5 до 150 км."
         : `✅ Радіус ${res.km} км. ` + (res.home ? (Number(chat) < 0 ? "Центр — Павлоград. Свій центр: /code." : "Центр — Павлоград. Своя точка: «📍 Моя геолокація».") : "Центр — ваша точка.");
-      await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : KEYBOARD });
+      await tgApi(env, "sendMessage", { chat_id: chat, text: msg, reply_markup: res === "range" ? RADIUS_KB : keyboard(env) });
     }
-  } else if (text.startsWith("/code") || text.includes("код для карти")) {
+  } else if (text.includes("код для карти") && !text.startsWith("/code")) {
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env), text: "Кнопку «Код для карти» замінено на «🗺 Відкрити карту» — карта відкривається прямо тут, у Telegram." });
+  } else if (text.startsWith("/code")) {
     const code = await issueCode(env, chat);
-    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, parse_mode: "HTML", text: code
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env), parse_mode: "HTML", text: code
       ? `Ваш код (натисніть на нього, щоб скопіювати):\n\n<code>${code}</code>\n\nВідкрийте карту → 📍 Радіус → «Підключити бота» і введіть цей код (діє 10 хвилин). Після цього бот сповіщатиме про цілі саме у вашому радіусі.`
       : "Сховище недоступне, спробуйте пізніше." });
   } else if (text.startsWith("/stop")) {

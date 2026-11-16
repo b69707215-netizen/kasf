@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Карта тривог України у реальному часі (з Telegram)</title>
+<title>Карта тривог України</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#181d26">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="css/app.css?v=13">
+<link rel="stylesheet" href="css/app.css?v=16">
 <script>
 /* Сайт складається з окремих файлів (css/, js/), тому його не можна відкривати просто як файл — лише через сервер. */
 if (!/^https?:$/.test(location.protocol)) {
@@ -26,13 +26,12 @@ if (!/^https?:$/.test(location.protocol)) {
   <aside id="sidebar">
     <header>
       <h1><img src="icons/icon-192.png" alt="" style="width:28px;height:28px;vertical-align:middle;border-radius:50%"> Карта тривог України</h1>
-      <div class="sub">Цілі та тривоги: dimap.live + офіційні джерела + Telegram-канали</div>
+      <div class="sub">Тривоги: Ukraine Alarm (офіційно) · цілі: dimap.live</div>
       <div class="badges">
         <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
-        <span class="badge clear" id="bClear">🟡 Райони: 0</span>
+        <span class="badge clear" id="bClear">🟥 Райони: 0</span>
         <span class="badge nodata" id="bNoData">🎯 Цілей: 0</span>
       </div>
-      <div class="badges" id="threatCounts"></div>
       <div class="controls">
         <button id="btnSound">🔇 Звук: вимк</button>
         <button id="btnRefresh">⟳ Оновити</button>
@@ -41,10 +40,9 @@ if (!/^https?:$/.test(location.protocol)) {
       <div id="official" class="official">⏳ Офіційні тривоги: завантаження…</div>
       <div id="raions" class="official">⏳ Тривоги по районах: завантаження…</div>
     </header>
-    <div id="channels"></div>
     <div id="footer">
-      Цілі й тривоги по районах — <a href="https://dimap.live/" target="_blank" rel="noopener">dimap.live</a> (з дозволу авторів).
-      Канали — публічні пости через <a href="https://t.me" target="_blank">t.me/s/</a>. Напрямок цілі — оцінка за курсом, не прогноз.
+      Тривоги — Ukraine Alarm (офіційно). Цілі — <a href="https://dimap.live/" target="_blank" rel="noopener">dimap.live</a> (з дозволу авторів).
+      Напрямок цілі — оцінка за курсом, не прогноз. Неофіційна карта: орієнтуйтесь на сирену.
     </div>
   </aside>
   <main id="mapwrap">
@@ -96,19 +94,27 @@ if (!/^https?:$/.test(location.protocol)) {
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="js/config.js?v=1"></script>
-<script src="js/places.js?v=2"></script>
-<script src="js/map.js?v=2"></script>
-<script src="js/oblasts.js?v=5"></script>
-<script src="js/network.js?v=2"></script>
-<script src="js/ui.js?v=1"></script>
-<script src="js/official.js?v=3"></script>
-<script src="js/targets.js?v=12"></script>
-<script src="js/raions.js?v=7"></script>
+<script src="js/config.js?v=4"></script>
+<script src="js/places.js?v=3"></script>
+<script src="js/map.js?v=4"></script>
+<script src="js/oblasts.js?v=7"></script>
+<script src="js/network.js?v=3"></script>
+<script src="js/ui.js?v=2"></script>
+<script src="js/official.js?v=5"></script>
+<script src="js/targets.js?v=16"></script>
+<script src="js/raions.js?v=10"></script>
 <script src="js/radius.js?v=8"></script>
-<script src="js/app.js?v=3"></script>
-<script src="js/panel.js?v=6"></script>
+<script src="js/app.js?v=5"></script>
+<script src="js/panel.js?v=7"></script>
 <script src="js/threats.js?v=1"></script>
 <script src="js/install.js?v=1"></script>
+<script>
+/* Відкрито як веб-додаток Telegram (кнопка «🗺 Відкрити карту» в боті): розгортаємо на весь екран */
+if (/tgWebApp/.test(location.hash)) {
+  const t = document.createElement("script"); t.src = "https://telegram.org/js/telegram-web-app.js";
+  t.onload = () => { try { Telegram.WebApp.ready(); Telegram.WebApp.expand(); } catch (e) {} };
+  document.head.appendChild(t);
+}
+</script>
 </body>
 </html>

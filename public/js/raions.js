@@ -13,8 +13,6 @@ let raionGeo = {};
 try { raionGeo = JSON.parse(localStorage.getItem("raionGeo") || "{}"); } catch (e) {}
 const raionQueue = []; let raionBusy = false, lastAir = [];
 /* Назви з офіційного джерела: апостроф ’ → ' (як у наших межах), перейменовані райони → поточна назва в ukraine.json */
-const RAION_ALIAS = { "Красноградський район": "Берестинський район" };
-const normRaion = n => { n = String(n || "").replace(/[’ʼ‘`]/g, "'"); return RAION_ALIAS[n] || n; };
 /* Громада / місто без меж → найближчий за назвою населений пункт із places.json: «м. Харків та Харківська …» → Харків, «Вовчанська територіальна громада» → Вовчанськ */
 function placeFor(name) {
   const base = String(name).replace(/^м\.\s*/, "").split(" та ")[0].replace(/\s*територіальна громада$/i, "").trim();
@@ -35,16 +33,12 @@ function paintRaions() {
   lastAir.forEach(r => {
     const g = raionGeo[r.region];
     const red = r.color === "red";
-    const flat = typeof uiFlat === "function" && uiFlat();
-    /* плоска мапа: кольори й сходинки — як на map.ukrainealarm.com (знято з живої мапи): червоний темнішає зі спливом тривоги
-       <15 хв #d45b50 · <30 хв #bc4a40 · <1 год #a53931 · <24 год #91322b · довше #7e2b25; жовта загроза — #ffc200 з прозорістю 74% */
+    /* червоний темнішає з тривалістю тривоги, як на офіційній карті: <15 хв · <30 хв · <1 год · <24 год · довше */
     const mins = r.startedAt ? (Date.now() - r.startedAt) / 60000 : 0;
     const redFill = mins < 15 ? "#d45b50" : mins < 30 ? "#bc4a40" : mins < 60 ? "#a53931" : mins < 1440 ? "#91322b" : "#7e2b25";
-    const style = flat
-      ? { fillColor: red ? redFill : "#cca115", fillOpacity: 1, color: "rgba(255,255,255,.35)", weight: 0.7 }
-      : { fillColor: red ? "#6b1a1a" : "#7a6610", fillOpacity: red ? 0.74 : 0.62, color: red ? "rgba(255,130,130,.22)" : "#d4b23a", weight: red ? 0.7 : 1.3 };
+    const style = { fillColor: red ? redFill : "#d9a514", fillOpacity: red ? 0.72 : 0.55, color: red ? "rgba(255,150,140,.55)" : "#f2c94c", weight: 0.8 };
     const since = r.startedAt ? `<br><span style="font-size:11px;color:#8b93a5">з ${new Date(r.startedAt).toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>` : "";
-    const popup = `<b>${escapeHtml(r.region)}</b><br>${red ? "🔴 повітряна тривога" : "🟡 загроза"}${since}<br><span style="font-size:11px;color:#8b93a5">джерело: ${raionSource}</span>`;
+    const popup = `<b>${escapeHtml(r.region)}</b><br>${red ? "🔴 повітряна тривога" : "🟡 загроза"}${since}<br><span style="font-size:11px;color:#8b93a5">підтверджує: ${escapeHtml((r.srcs || [raionSource]).join(", "))}</span>`;
     if (g) { L.geoJSON(g, { style }).bindPopup(popup).addTo(raionLayer); return; }
     /* меж немає (громади, міста): тривогу не губимо — малюємо коло навколо населеного пункту */
     const p = placeFor(r.region);
@@ -77,31 +71,13 @@ function drawRaions(air) {
 }
 
 /* Повітряні тривоги з офіційної карти (райони, громади, області/міста): Red → red, Yellow → yellow */
-let raionSource = "map.ukrainealarm.com";
+let raionSource = "";
 async function officialRaions() {
-  let regions = null;
-  try {   // 1) офіційне API з ключем (через наш Worker)
-    const r = await fetch("/ua-alerts", { signal: AbortSignal.timeout(6000) });
-    if (r.ok) { const a = await r.json(); if (Array.isArray(a)) regions = a; }
-  } catch (e) {}
-  if (!regions) {   // 2) відкритий запит самої карти (без ключа)
-    const raw = await fetchViaProxy("https://map.ukrainealarm.com/api/v2/data/mapUpdate", t => t.trim().startsWith("{"));
-    if (!raw) return null;
-    let j; try { j = JSON.parse(raw); } catch (e) { return null; }
-    if (!j || !Array.isArray(j.alerts)) return null;
-    regions = j.alerts;
-  }
-  const out = [];
-  for (const r of regions) {
-    const air = (r.activeAlerts || []).find(a => a.type === "AIR");   // артилерія / бої в містах — не повітряна тривога
-    if (!air) continue;
-    const lv = air.activeAlertLevels || [];
-    const color = lv.some(l => l.alertLevel === "Red") ? "red" : lv.some(l => l.alertLevel === "Yellow") ? "yellow" : null;
-    if (!color) continue;
-    const t = Date.parse((lv[0] && lv[0].createdAt) || air.lastUpdate);
-    out.push({ region: normRaion(r.regionName), alertType: "air", color, startedAt: t || Date.now() });
-  }
-  return out;
+  const m = await fetchMergedAlerts();
+  if (!m) return null;
+  raionSource = m.sources.join(" + ");
+  /* області фарбуються окремо (oblasts.js) — тут лише райони, громади й міста */
+  return m.list.filter(r => r.level !== "oblast").map(r => ({ region: r.region, alertType: "air", color: r.color, startedAt: r.since || Date.now(), srcs: r.srcs }));
 }
 
 let ukrMerged = false;
@@ -114,7 +90,6 @@ async function refreshRaions() {
   }
   /* Основне джерело — офіційна карта map.ukrainealarm.com; якщо недоступна — dimap.live */
   let air = await officialRaions();
-  raionSource = "map.ukrainealarm.com";
   if (!air) {
     raionSource = "dimap.live";
     const raw = await fetchViaProxy("https://api.dimap.live/api/alerts", t => t.trim().startsWith("["));
