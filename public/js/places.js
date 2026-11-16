@@ -125,10 +125,7 @@ function extractTracks(txt) {
    1) локальний /proxy (якщо запущено через run.cmd — найнадійніше)
    2-4) публічні проксі (якщо відкрито файл напряму) */
 const PROXIES = [
-  u => "/proxy?url=" + encodeURIComponent(u),
-  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-  u => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u),
-  u => "https://api.cors.lol/?url=" + encodeURIComponent(u)
+  u => "/proxy?url=" + encodeURIComponent(u)   // лише наш Worker: сторонні публічні проксі прибрано (повільні, ненадійні, давали затримку до 25 с)
 ];
 const REFRESH_MS = 20000;      // канали — кожні 20 сек (майже в реальному часі)
 const STAGGER_MS = 3000;       // канали опитуються по черзі, щоб не перевантажити проксі

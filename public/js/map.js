@@ -30,7 +30,7 @@ const map = L.map("map", {
 const satDarkLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
   attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 18, className: "sat-dark"
 }).addTo(map);
-satDarkLayer.once("load", () => { readyFlags.tiles = true; checkReady(); });
+readyFlags.tiles = true;   // основа за замовчуванням — плоска (без плиток), тож чекати плитки не треба
 const satLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
   attribution: "Esri, Maxar, Earthstar Geographics", maxZoom: 18
 });

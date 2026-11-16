@@ -1,5 +1,5 @@
 // Мінімальний service worker: оболонка карти кешується, дані (/proxy, /alerts, /link, /tg) — завжди з мережі.
-const CACHE = "radf4-shell-v1";
+const CACHE = "radf4-shell-v5";
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));

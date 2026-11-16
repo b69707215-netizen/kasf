@@ -4,7 +4,7 @@
 async function fetchViaProxy(url, validate) {
   for (const p of PROXIES) {
     try {
-      const r = await fetch(p(url), { signal: AbortSignal.timeout(25000) });
+      const r = await fetch(p(url), { signal: AbortSignal.timeout(6000) });
       if (!r.ok) continue;
       const t = await r.text();
       if (!validate || validate(t)) return t;

@@ -249,3 +249,132 @@
     background: #1f4d36; color: #bff0d3; border: 1px solid #2f7a54; }
   #botFollowRow { display: block; margin-top: 6px; font-size: 12.5px; cursor: pointer; }
   #botFollowRow small { color: var(--muted); }
+
+  /* ---------- Нове керування: кнопки справа зверху + панель налаштувань ---------- */
+  #modeBar, #btnRadius, #btnSide, .leaflet-control-layers { display: none !important; }
+  #ctl { position: absolute; top: 12px; right: 12px; z-index: 1700; }
+  #ctl .ctl-btns { display: flex; gap: 8px; justify-content: flex-end; }
+  #ctl .ctl-btns button {
+    width: 46px; height: 46px; border-radius: 12px; border: 1px solid #3a4150;
+    background: rgba(36,40,48,.96); color: #e8ecf3; font-size: 21px; cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,.45);
+  }
+  #ctl .ctl-btns button:hover { background: #2f343e; }
+  #ctlPanel {
+    margin-top: 8px; width: 310px; max-width: calc(100vw - 24px); background: rgba(40,44,52,.98);
+    border: 1px solid #3a4150; border-radius: 14px; padding: 4px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.55);
+  }
+  #ctlPanel[hidden] { display: none; }
+  .ctl-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 0; border-bottom: 1px solid #3a4150; font-size: 16px; color: #eef1f6; cursor: pointer; }
+  .ctl-row:last-child { border-bottom: 0; }
+  .ctl-row .sw { flex: none; width: 52px; height: 30px; border-radius: 15px; background: #4a4f58; position: relative; transition: background .15s; }
+  .ctl-row .sw i { position: absolute; top: 4px; left: 4px; width: 22px; height: 22px; border-radius: 50%; background: #b9bcc2; transition: left .15s, background .15s; }
+  .ctl-row .sw.on { background: #a4a7ad; }
+  .ctl-row .sw.on i { left: 26px; background: #14171c; }
+  /* верхня панель-лічильник не заходить під кнопки */
+  #timestamp { max-width: calc(100% - 150px) !important; }
+
+  /* ---------- Радар наближення (панель радіуса) ---------- */
+  #radiusPanel {
+    position: absolute; left: 14px; top: 14px; bottom: auto; right: auto; width: 400px; max-width: calc(100vw - 28px);
+    max-height: calc(100% - 28px); display: none; flex-direction: column; z-index: 1800;
+    background: #2a2e36; border: 1px solid #3a4150; border-radius: 18px; padding: 0; color: #eef1f6;
+    box-shadow: 0 10px 40px rgba(0,0,0,.6); font-size: 15px; line-height: 1.4; overflow: hidden;
+  }
+  #radiusPanel .rp-head { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px 6px; margin: 0; }
+  #radiusPanel .rp-head h2 { font-size: 22px; font-weight: 700; }
+  #radiusPanel .rp-head button { background: none; border: 0; color: #b9bcc2; font-size: 22px; cursor: pointer; }
+  #radiusPanel .rp-body { padding: 4px 20px 12px; overflow-y: auto; flex: 1; }
+  #radiusPanel .rp-green { color: #7be8a2; font-weight: 700; font-size: 13px; margin-bottom: 12px; }
+  #radiusPanel .rp-card { border: 1px solid #3f4655; background: #2f343d; border-radius: 12px; padding: 14px; margin-bottom: 18px; }
+  #radiusPanel .rp-card p { color: #aab0bc; font-size: 14px; margin: 4px 0 12px; }
+  #radiusPanel .rp-outline {
+    width: 100%; padding: 13px; border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: 700;
+    background: transparent; color: #8fb2f6; border: 1px solid #5d7fc4;
+  }
+  #radiusPanel .rp-outline:hover { background: rgba(125,160,240,.12); }
+  #radiusPanel .rp-second { margin-top: 8px; }
+  #radiusPanel .rp-label { display: flex; justify-content: space-between; align-items: baseline; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  #radiusKmLabel { font-size: 30px; font-weight: 700; color: #fff; min-width: 0; }
+  #radiusPanel input[type=range] { width: 100%; accent-color: #7da0f0; height: 6px; cursor: pointer; }
+  #radiusPanel .rp-scale { display: flex; justify-content: space-between; color: #aab0bc; font-size: 13px; margin: 6px 0 18px; }
+  #radiusPanel .rp-label2 { font-weight: 700; font-size: 16px; margin: 12px 0 8px; }
+  #radiusPanel select {
+    width: 100%; padding: 13px 12px; border-radius: 10px; background: #23272e; color: #fff; border: 1px solid #4a5160; font-size: 16px; font-weight: 600;
+  }
+  #radiusPanel .rp-link { display: inline-block; color: #8fb2f6; font-weight: 700; margin: 12px 0 8px; text-decoration: none; }
+  #radiusPanel .rp-hint { color: #aab0bc; font-size: 13.5px; margin-bottom: 14px; }
+  #radiusPanel #radiusStatus { max-height: 26vh; overflow-y: auto; margin-bottom: 8px; font-size: 14px; }
+  #radiusPanel #radiusBot { border-top: 1px solid #3f4655; padding-top: 6px; font-size: 14px; }
+  #radiusPanel #radiusBot input, #radiusPanel #radiusBot button { font-size: 14px; }
+  #radiusPanel #radiusBot input[type=text], #radiusPanel #botCode { padding: 10px; border-radius: 8px; background: #23272e; color: #fff; border: 1px solid #4a5160; width: 100%; margin-bottom: 8px; }
+  #radiusPanel #radiusBot button { padding: 10px 12px; border-radius: 8px; border: 1px solid #5d7fc4; background: transparent; color: #8fb2f6; font-weight: 700; cursor: pointer; margin-top: 6px; }
+  #radiusPanel #botForm { display: flex; flex-direction: column; }
+  #radiusPanel #botLinked { align-items: center; justify-content: space-between; color: #7be8a2; font-weight: 700; }
+  #radiusPanel #botMsg { color: #aab0bc; font-size: 13px; margin-top: 6px; }
+  #radiusPanel .rp-foot { display: flex; gap: 12px; padding: 14px 20px 18px; border-top: 1px solid #3a4150; background: #2a2e36; }
+  #radiusPanel .rp-btn { flex: 1; padding: 15px 10px; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; background: #1c1f25; color: #fff; border: 1px solid #3f4655; }
+  #radiusPanel .rp-primary { background: #7da0f0; color: #101828; border-color: #7da0f0; }
+  @media (max-width: 800px) {
+    #radiusPanel { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; max-width: none; max-height: 82vh; }
+  }
+  /* кнопка-радар справа зверху */
+  #ctl .ctl-btns button svg { display: block; margin: auto; }
+  #ctl .ctl-btns button.on { border-color: #3ddc84; box-shadow: 0 0 0 2px rgba(61,220,132,.25), 0 2px 10px rgba(0,0,0,.45); }
+
+  /* ---------- «Загрози»: плашка зліва зверху ---------- */
+  #timestamp { display: none !important; }
+  #thr { position: absolute; top: 12px; left: 12px; z-index: 1700; background: rgba(40,44,52,.97); border: 1px solid #3a4150; border-radius: 14px; box-shadow: 0 6px 24px rgba(0,0,0,.5); color: #eef1f6; }
+  #thr.th-closed { padding: 6px 8px 6px 16px; }
+  #thr.th-open { width: 340px; max-width: calc(100vw - 100px); max-height: calc(100% - 100px); display: flex; flex-direction: column; padding: 10px 6px 10px 14px; }
+  .th-head { display: flex; align-items: center; gap: 10px; }
+  .th-head2 { justify-content: space-between; padding: 0 8px 8px 4px; }
+  .th-title { font-size: 17px; font-weight: 700; }
+  .th-count { font-size: 20px; color: #e0564e; }
+  .th-warn { color: #ffb86b; font-size: 16px; }
+  .th-ic { flex: none; width: 36px; height: 36px; border-radius: 50%; background: #dc5a52; display: inline-flex; align-items: center; justify-content: center; }
+  .th-toggle { width: 42px; height: 42px; border-radius: 10px; border: 0; background: #14171c; color: #fff; font-size: 26px; line-height: 1; cursor: pointer; margin-left: 4px; }
+  .th-list { overflow-y: auto; flex: 1; padding-right: 8px; border-top: 1px solid #3a4150; }
+  .th-item { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #3a4150; cursor: pointer; }
+  .th-item:hover { background: rgba(255,255,255,.04); }
+  .th-name { font-size: 17px; font-weight: 700; }
+  .th-type { font-size: 15px; margin-top: 2px; }
+  .th-time { color: #a9afbb; font-size: 14px; margin-top: 2px; display: flex; align-items: center; }
+  .th-sep { width: 1px; height: 14px; background: #4a5160; margin: 0 8px; }
+  .th-ago { color: #d79a5a; }
+  .th-empty { padding: 18px 4px; color: #a9afbb; }
+  @media (max-width: 800px) { #thr.th-open { width: calc(100vw - 24px); max-width: none; max-height: 58vh; } }
+
+  /* ---------- Шторка «Позначення на мапі» ---------- */
+  #tgLegend { display: none !important; }
+  #map.no-glow .tg-glow { display: none; }
+  #ctl .ctl-btns button#ctlHelp { font-size: 22px; font-weight: 600; }
+  #legendPanel { position: absolute; left: 0; top: 0; bottom: 0; width: 400px; max-width: 100vw; z-index: 1900; background: #2a2e36; border-right: 1px solid #3a4150; box-shadow: 8px 0 30px rgba(0,0,0,.5); display: flex; flex-direction: column; color: #eef1f6; }
+  #legendPanel[hidden] { display: none; }
+  .lg-head { display: flex; justify-content: space-between; align-items: center; padding: 22px 22px 8px; }
+  .lg-head h2 { font-size: 24px; font-weight: 700; }
+  .lg-x { background: none; border: 0; color: #b9bcc2; font-size: 24px; cursor: pointer; }
+  .lg-body { overflow-y: auto; padding: 8px 22px 28px; flex: 1; }
+  .lg-body h3 { font-size: 18px; font-weight: 600; margin: 16px 0 14px; }
+  .lg-body hr { border: 0; border-top: 1px solid #3a4150; margin: 18px 0; }
+  .lg-body p { color: #aab0bc; font-size: 15px; line-height: 1.5; margin-top: 10px; }
+  .lg-row { display: flex; align-items: center; gap: 14px; font-size: 15.5px; margin: 12px 0; }
+  .lg-big { font-size: 18px; font-weight: 600; }
+  .lg-sq { flex: none; width: 24px; height: 24px; border-radius: 4px; }
+  .lg-glow { flex: none; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle, #ff3c3c 0%, rgba(255,60,60,.5) 45%, rgba(255,60,60,0) 72%); }
+  .lg-trow { display: flex; align-items: center; gap: 16px; margin: 6px 0; font-size: 17px; }
+  .lg-ico { flex: none; width: 50px; height: 50px; display: inline-flex; align-items: center; justify-content: center; }
+  .lg-n { color: #ff8a8a; font-weight: 600; font-size: 16px; }
+  .lg-no { color: #a9afbb; font-weight: 400; font-size: 16px; }
+  @media (max-width: 800px) { #legendPanel { width: 100vw; } }
+
+  /* внизу карти без підпису Leaflet/Esri (подяки — у налаштуваннях ⚙) */
+  .leaflet-control-attribution { display: none !important; }
+  .ctl-credit { padding: 12px 0 10px; font-size: 11.5px; color: #8f95a1; line-height: 1.5; border-top: 1px solid #3a4150; }
+
+/* ===== Плоска мапа (як офіційна): назви областей білим по центру ===== */
+#map.flat { background: #141921; }
+.ob-label { background: none; border: none; display: none; pointer-events: none; }
+#map.flat .ob-label { display: block; }
+#map.z-hi .ob-label { display: none; }
+.ob-label span { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; text-align: center; color: #fff; font: 600 12px/1.1 "Segoe UI", Arial, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; }

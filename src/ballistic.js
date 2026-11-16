@@ -25,7 +25,7 @@ export async function checkBallistic(seen = [], now = Date.now()) {
   const fresh = [], known = new Set(seen);
   for (const ch of CHANNELS) {
     try {
-      const r = await fetch(`https://t.me/s/${ch}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
+      const r = await fetch(`https://t.me/s/${ch}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }, signal: AbortSignal.timeout(4000) });
       if (!r.ok) { console.log("ballistic http", ch, r.status); continue; }
       for (const p of parsePosts(await r.text(), ch)) {
         if (known.has(p.id) || !(now - p.time < MAX_AGE_MS)) continue;
@@ -38,4 +38,4 @@ export async function checkBallistic(seen = [], now = Date.now()) {
 }
 
 export const ballisticText = p =>
-  `🚨 ЗАГРОЗА БАЛІСТИКИ\n\n${p.text.slice(0, 600)}\n\n⚠️ Негайно в укриття! Джерело: https://t.me/${p.id}`;
+  `🚨 ЗАГРОЗА БАЛІСТИКИ\n\n${p.text.slice(0, 600)}\n\n⚠️ Негайно в укриття! Джерело: наша карта — https://damih-havajsa.pp.ua/`;

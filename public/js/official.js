@@ -29,9 +29,27 @@ async function refreshOfficial() {
   const box = $("official");
   let rows = null;
 
-  // джерело 0: ОФІЦІЙНЕ API alerts.in.ua (потрібен токен у файлі alerts_token.txt)
+  // джерело 00: офіційне API Ukraine Alarm (ключ у секреті Worker) — області, де тривога на весь регіон
   try {
-    const r = await fetch("/alerts", { signal: AbortSignal.timeout(20000) });
+    const r = await fetch("/ua-alerts", { signal: AbortSignal.timeout(6000) });
+    if (r.ok) {
+      const list = await r.json();
+      if (Array.isArray(list)) {
+        rows = {};
+        OBLASTS.forEach(o => {
+          const names = [o.name, ...(o.alt || [])];
+          const hit = list.find(x => x.regionType === "State" && names.includes(x.regionName) && (x.activeAlerts || []).some(a => a.type === "AIR"));
+          const air = hit && hit.activeAlerts.find(a => a.type === "AIR");
+          rows[o.key] = { alert: !!hit, changed: hit ? ((air.activeAlertLevels && air.activeAlertLevels[0] && air.activeAlertLevels[0].createdAt) || air.lastUpdate) : null };
+        });
+        officialSource = "Ukraine Alarm (офіційне API)";
+      }
+    }
+  } catch (e) { rows = null; }
+
+  // джерело 0: ОФІЦІЙНЕ API alerts.in.ua (потрібен токен у файлі alerts_token.txt)
+  if (!rows) try {
+    const r = await fetch("/alerts", { signal: AbortSignal.timeout(6000) });
     if (r.ok) {
       const j = await r.json();
       const act = (j.alerts || []).filter(x => x.alert_type === "air_raid" && !x.finished_at);

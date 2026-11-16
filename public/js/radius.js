@@ -3,19 +3,34 @@
    📍 — відкриває панель: центр беремо з геолокації (або тапом по карті), радіус 5–150 км.
    Статус оновлюється разом із даними цілей (updateRadius викликається з targets.js). */
 const RADIUS_MAX_KM = 150, RADIUS_MIN_KM = 5;
-const radiusState = { on: false, center: null, km: 20, picking: false, where: "" };
+const radiusState = { on: false, center: null, km: 20, picking: false, where: "", keep: false };   // keep — коло лишається на карті й після закриття панелі / перезавантаження
 try { Object.assign(radiusState, JSON.parse(localStorage.getItem("radius") || "{}"), { on: false, picking: false }); } catch (e) {}
 radiusState.km = Math.min(RADIUS_MAX_KM, Math.max(RADIUS_MIN_KM, +radiusState.km || 20));
+/* Налаштування «радара»: звук при вході цілі в коло, пауза між повторами для однієї цілі */
+const radar = { repeat: 0, sound: "1" };
+try { Object.assign(radar, JSON.parse(localStorage.getItem("radar") || "{}")); } catch (e) {}
+const saveRadar = () => { try { localStorage.setItem("radar", JSON.stringify(radar)); } catch (e) {} };
+const radarInside = new Set(), radarLast = {}; let radarInit = false;
+function playRadarSound() { try { if (radar.sound === "1") beep(); else if (radar.sound === "2") siren(); } catch (e) {} }
+function radarCheck(list) {   // звук лише коли ціль перетнула коло ззовні всередину; уже всередині — тихо
+  const ids = new Set(list.map(x => x.t.id));
+  if (!radarInit) { radarInit = true; ids.forEach(i => radarInside.add(i)); return; }
+  for (const x of list) {
+    if (radarInside.has(x.t.id)) continue;
+    if (radar.sound !== "off" && Date.now() - (radarLast[x.t.id] || 0) >= radar.repeat * 60000) { radarLast[x.t.id] = Date.now(); playRadarSound(); }
+  }
+  radarInside.clear(); ids.forEach(i => radarInside.add(i));
+}
 
 const radiusLayer = L.layerGroup().addTo(map);
-function saveRadius() { try { localStorage.setItem("radius", JSON.stringify({ center: radiusState.center, km: radiusState.km, where: radiusState.where })); } catch (e) {} }
+function saveRadius() { try { localStorage.setItem("radius", JSON.stringify({ center: radiusState.center, km: radiusState.km, where: radiusState.where, keep: radiusState.keep })); } catch (e) {} }
 
 const SIDE_NAMES = ["півночі", "північному сході", "сході", "південному сході", "півдні", "південному заході", "заході", "північному заході"];
 const sideOf = deg => SIDE_NAMES[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 
 function drawRadius() {
   radiusLayer.clearLayers();
-  if (!radiusState.on || !radiusState.center) return;
+  if (!(radiusState.on || radiusState.keep) || !radiusState.center) return;
   const c = radiusState.center;
   L.circle(c, { radius: radiusState.km * 1000, color: "#7cc7ff", weight: 1.6, dashArray: "7 6", fillColor: "#7cc7ff", fillOpacity: 0.06, interactive: false }).addTo(radiusLayer);
   L.circleMarker(c, { radius: 6, color: "#ffffff", weight: 2, fillColor: "#3b9eff", fillOpacity: 1, interactive: false }).addTo(radiusLayer);
@@ -44,6 +59,7 @@ function updateRadius() {
   const fresh = typeof dimapLastOk !== "undefined" && dimapLastOk && Date.now() - dimapLastOk < 90000;
   if (!fresh) { box.innerHTML = `<span class="rs-warn">⚠ Дані про цілі недоступні — перевірити радіус не можу.</span>`; return; }
   const list = targetsInRadius();
+  radarCheck(list);
   const where = radiusState.where ? ` (${escapeHtml(radiusState.where)})` : "";
   if (!list.length) {
     box.innerHTML = `<div class="rs-ok">✅ У радіусі ${radiusState.km} км цілей немає</div><div class="rs-note">Центр${where}. Оновлено ${new Date().toLocaleTimeString("uk-UA")}</div>`;
@@ -51,13 +67,13 @@ function updateRadius() {
   }
   box.innerHTML = `<div class="rs-bad">⚠️ У радіусі ${radiusState.km} км: ${list.length}</div>` +
     list.slice(0, 6).map(x => `<div class="rs-row" data-id="${x.t.id}"><span class="sw" style="background:${x.t.color}"></span><b>${escapeHtml(x.t.label)}</b> — ${x.km.toFixed(1)} км, на ${x.side}` +
-      `<div class="rs-sub">курс ${Math.round(x.t.brg)}°, ${Math.round(x.t.spd)} км/год${x.toward ? ` · ➜ на вас, ~${x.eta} хв` : " · не прямо на вас"}</div></div>`).join("") +
+      `<div class="rs-sub">курс ${Math.round(x.t.brg)}°, ${Math.round(x.t.spd)} км/год${x.t.spd > 20 ? ` · ⏱ ~${Math.max(1, Math.round(x.km / x.t.spd * 60))} хв до вас${x.toward ? "" : " (по прямій)"}` : " · стоїть"}</div></div>`).join("") +
     (list.length > 6 ? `<div class="rs-note">…і ще ${list.length - 6}</div>` : "") +
     `<div class="rs-note">Напрямок — оцінка за курсом. Центр${where}.</div>`;
 }
 
 function setRadiusCenter(latlng, where) {
-  radiusState.center = [latlng.lat, latlng.lng]; radiusState.where = where || "";
+  radiusState.center = [latlng.lat, latlng.lng]; radiusState.where = where || ""; radiusState.keep = true;
   saveRadius(); updateRadius();
   fitRadius();
 }
@@ -69,7 +85,7 @@ function fitRadius() {
   const mobile = window.innerWidth <= 800;
   const h = radiusState.on ? Math.round(map.getSize().y - panel.offsetTop) : 0;
   map.fitBounds(L.latLng(radiusState.center).toBounds(radiusState.km * 2000),
-    { paddingTopLeft: [20, mobile ? 70 : 20], paddingBottomRight: [20, mobile ? h + 10 : 20] });
+    { paddingTopLeft: [mobile ? 20 : 440, mobile ? 70 : 20], paddingBottomRight: [20, mobile ? h + 10 : 20] });
 }
 
 function useMyLocation() {
@@ -95,17 +111,31 @@ function pickOnMap() {
 
 function openRadius(on) {
   radiusState.on = on;
-  document.getElementById("radiusPanel").style.display = on ? "block" : "none";
+  document.getElementById("radiusPanel").style.display = on ? "flex" : "none";
   document.getElementById("btnRadius").classList.toggle("on", on);
+  const cr = document.getElementById("ctlRadius"); if (cr) cr.classList.toggle("on", on);
+  radarInit = false; radarInside.clear();
   if (on) {
     document.getElementById("radiusKm").value = radiusState.km;
     document.getElementById("radiusKmLabel").textContent = radiusState.km + " км";
     if (!radiusState.center) useMyLocation(); else { updateRadius(); fitRadius(); }
-  } else { radiusLayer.clearLayers(); }
+  } else { drawRadius(); }   // панель закрито — коло лишається (якщо не «Вимкнути радар»)
 }
 
 document.getElementById("btnRadius").onclick = () => openRadius(!radiusState.on);
 document.getElementById("radiusClose").onclick = () => openRadius(false);
+document.getElementById("radiusOff").onclick = () => { radiusState.keep = false; saveRadius(); openRadius(false); };   // «Вимкнути радар» — прибирає коло з карти
+document.getElementById("radiusSave").onclick = () => {   // зберігаємо радіус і налаштування; якщо підключено бота — підтверджуємо радіус і для нього
+  radiusState.keep = !!radiusState.center; saveRadius(); saveRadar();
+  const bc = document.getElementById("botConfirm"); if (bc && bc.style.display === "block") bc.click();
+  openRadius(false);
+};
+const rpRepeat = document.getElementById("radarRepeat"), rpSound = document.getElementById("radarSound");
+rpRepeat.value = String(radar.repeat); rpSound.value = radar.sound;
+rpRepeat.onchange = () => { radar.repeat = +rpRepeat.value; saveRadar(); };
+rpSound.onchange = () => { radar.sound = rpSound.value; saveRadar(); playRadarSound(); };
+document.getElementById("radarTest").onclick = e => { e.preventDefault(); playRadarSound(); };
+drawRadius();   // після перезавантаження одразу показуємо збережене коло
 document.getElementById("radiusMe").onclick = useMyLocation;
 document.getElementById("radiusPick").onclick = pickOnMap;
 document.getElementById("radiusKm").oninput = e => {

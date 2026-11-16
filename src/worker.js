@@ -1,10 +1,11 @@
 // Cloudflare Worker: віддає карту (public/) і замінює локальний server.ps1:
 //   /proxy?url=...  — читає лише дозволені сайти (Telegram, dimap, джерела тривог)
 //   /alerts         — офіційне API alerts.in.ua (токен у секреті ALERTS_TOKEN)
-import { run as runBot } from "./pavlohrad.js";
+import { run as runBot, botStatus } from "./pavlohrad.js";
 import { linkFromMap, syncFromMap } from "./link.js";
 import { handleWebhook, setupWebhook } from "./telegram.js";
-const ALLOWED = new Set(["t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live"]);
+export { BotState } from "./botstate.js";   // Durable Object зі станом бота (див. botstate.js)
+const ALLOWED = new Set(["t.me", "alerts.com.ua", "ubilling.net.ua", "api.dimap.live", "map.ukrainealarm.com"]);
 
 async function proxy(request) {
   const target = new URL(request.url).searchParams.get("url");
@@ -16,7 +17,7 @@ async function proxy(request) {
   try {
     const r = await fetch(u.toString(), {
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-      cf: { cacheTtl: 3, cacheEverything: true },   // коротке кешування розвантажує джерела
+      cf: { cacheTtl: 2, cacheEverything: true },   // коротке кешування (2 с) розвантажує джерела; разом із опитуванням 5 с затримка на нашому боці ≤ 7 с
     });
     return new Response(r.body, {
       status: r.status,
@@ -36,7 +37,24 @@ async function alerts(env) {
   try {
     const r = await fetch("https://api.alerts.in.ua/v1/alerts/active.json", {
       headers: { Authorization: "Bearer " + env.ALERTS_TOKEN, "User-Agent": "radf4-threat-map" },
-      cf: { cacheTtl: 5, cacheEverything: true },
+      cf: { cacheTtl: 2, cacheEverything: true },
+    });
+    return new Response(r.body, {
+      status: r.status,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
+    });
+  } catch {
+    return new Response("upstream error", { status: 502 });
+  }
+}
+
+/* Офіційне API Ukraine Alarm (ключ у секреті UKRAINEALARM_KEY). Віддаємо ті самі дані, що й карта: райони, громади, області */
+async function uaAlerts(env) {
+  if (!env.UKRAINEALARM_KEY) return new Response("no key", { status: 404 });
+  try {
+    const r = await fetch("https://api.ukrainealarm.com/api/v3/alerts", {
+      headers: { Authorization: env.UKRAINEALARM_KEY, "User-Agent": "radf4-threat-map" },
+      cf: { cacheTtl: 2, cacheEverything: true },
     });
     return new Response(r.body, {
       status: r.status,
@@ -50,6 +68,8 @@ async function alerts(env) {
 export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
+    if (request.method === "GET" && pathname === "/ua-alerts") return uaAlerts(env);
+    if (request.method === "GET" && pathname === "/bot-status") return new Response(JSON.stringify(await botStatus(env)), { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });   // лише лічильники, без чатів
     if (request.method === "GET" && pathname === "/proxy") return proxy(request);
     if (request.method === "GET" && pathname === "/alerts") return alerts(env);
     if (request.method === "POST" && pathname === "/tg") return handleWebhook(request, env);   // повідомлення від Telegram
@@ -60,6 +80,8 @@ export default {
   },
   // щохвилини (Cron Trigger): 12 перевірок з паузою 5 с — цілі біля Павлограда → Telegram
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runBot(env).catch(e => console.log("bot error", e && e.message)));
+    // чекаємо завершення прямо в обробнику (а не ctx.waitUntil): waitUntil обриває роботу приблизно через 30 с,
+    // через що друга половина хвилини не перевірялась → сповіщення запізнювались, а недовідправлені розсилки дублювались
+    await runBot(env).catch(e => console.log("bot error", e && e.message));
   },
 };
