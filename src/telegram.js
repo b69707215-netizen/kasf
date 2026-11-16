@@ -17,7 +17,12 @@ export async function getSubs(env) {
   try { const a = JSON.parse((await env.STATE.get("subs")) || "[]"); return Array.isArray(a) ? a.map(String) : []; }
   catch { return []; }
 }
-async function setSubs(env, arr) { if (env.STATE) await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); }
+/* true — збережено; false — сховище не прийняло (напр. вичерпано добовий ліміт KV) → не вдаємо, що підписали */
+async function setSubs(env, arr) {
+  if (!env.STATE) return false;
+  try { await env.STATE.put("subs", JSON.stringify([...new Set(arr)])); return true; }
+  catch (e) { console.log("subs save failed:", e && e.message); return false; }
+}
 
 const HELLO = "Привіт! 👋\n\nЯ попереджу тут, якщо ціль з'явиться в радіусі 20 км від Павлограда, " +
   "і напишу «відбій», коли небезпека мине.\n\n📏 «Радіус» — змінити радіус (до 150 км).\n" +
@@ -69,8 +74,9 @@ export async function handleWebhook(request, env) {
 
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
-    if (!subs.includes(chat)) await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
-    await tgApi(env, "sendMessage", { chat_id: chat, text: Number(chat) < 0 ? GROUP_HELLO : HELLO, reply_markup: KEYBOARD });
+    const saved = subs.includes(chat) || await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
+    await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD,
+      text: saved ? (Number(chat) < 0 ? GROUP_HELLO : HELLO) : "⚠️ Не вдалося зберегти підписку (тимчасовий збій сховища). Надішліть /start ще раз за кілька хвилин." });
   } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
     const km = await setHomeFromBot(env, chat);
     await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: KEYBOARD, text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
@@ -97,6 +103,18 @@ export async function handleWebhook(request, env) {
     await tgApi(env, "sendMessage", { chat_id: chat, text: BYE });
   }
   return new Response("ok");
+}
+
+/* Автономність: раз на 30 хв перевіряємо webhook і, якщо він злетів або не наш, підключаємо знову (потрібен WORKER_URL у wrangler.jsonc) */
+export async function ensureWebhook(env) {
+  if (!env.BOT_TOKEN || !env.WORKER_URL) return;
+  const hook = env.WORKER_URL.replace(/\/+$/, "") + "/tg";
+  const info = await (await tgApi(env, "getWebhookInfo", {})).json().catch(() => ({}));
+  if (info.ok && info.result && info.result.url === hook) return;
+  const body = { url: hook, allowed_updates: ["message", "edited_message", "my_chat_member"] };
+  if (env.WEBHOOK_SECRET && /^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) body.secret_token = env.WEBHOOK_SECRET;
+  const r = await tgApi(env, "setWebhook", body);
+  console.log("webhook restored", hook, r.status);
 }
 
 /* Одноразове підключення: відкрийте https://<ваш-worker>/tg/setup — Worker сам зареєструє свій webhook у Telegram */

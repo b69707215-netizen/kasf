@@ -38,15 +38,23 @@ const oblastLayers = {};
    { oblasts: {ключ: геометрія}, raions: {"Назва район": геометрія} }. Якщо файлу немає — запасні шляхи. */
 const UKR = fetch("ukraine.json").then(r => r.ok ? r.json() : null).catch(() => null);
 
+/* Плоска мапа (як офіційна): суцільні сірі області, тривога на всю область — суцільний червоний, загроза — жовтий */
+const isFlat = () => typeof uiFlat === "function" && uiFlat();
 function oblastStyle(key) {
+  if (isFlat()) {
+    const s = currentMode === "map" ? null : oblastState[key];
+    if (s === "alert") return { fillColor: "#91322b", fillOpacity: 1, color: "#5b6073", weight: 1 };
+    if (s === "threat") return { fillColor: "#cca115", fillOpacity: 1, color: "#5b6073", weight: 1 };
+    return { fillColor: "#3b4351", fillOpacity: 1, color: "#566074", weight: 1 };
+  }
   // режим «Карта»: нейтральні області без кольорів тривог
   if (currentMode === "map") return { fillColor: "#262d3a", fillOpacity: 0.28, color: "#4a5670", weight: 1.2 };
   const s = oblastState[key];
   if (s === "alert") return {
-    fillColor: "#8f2222", fillOpacity: 0.42, color: "#c04848", weight: 1.4
+    fillColor: "#6b1a1a", fillOpacity: 0.55, color: "#8f3535", weight: 1.3
   };
   if (s === "threat") return {
-    fillColor: "#8a7620", fillOpacity: 0.36, color: "#b09a3a", weight: 1.4
+    fillColor: "#7a6610", fillOpacity: 0.5, color: "#d4b23a", weight: 1.4
   };
   if (s === "clear") return {
     fillColor: "#1b2230", fillOpacity: 0.22, color: "#46506a", weight: 1.5
@@ -79,32 +87,13 @@ function updateOblastStyles() {
 function recomputeOblastStates() {
   OBLASTS.forEach(o => {
     const official = officialAlert[o.key];
-    let red = official === true;
-    let yellow = false;
-    let hasData = official !== undefined;
-    let chClassic = false;
-    CHANNELS.forEach(ch => {
-      const st = state[ch.id];
-      if (st.status !== "ok") return;
-      // якщо в пості названо конкретні області — фарбуємо саме їх (а не «рідну» область каналу)
-      const txt = (st.alertTxt || "").toLowerCase();
-      const mentioned = st.state === "alert" && txt ? OBLASTS.filter(x => x.stems.some(s => txt.includes(s))) : [];
-      const applies = mentioned.length ? mentioned.some(x => x.key === o.key) : ch.oblast === o.key;
-      if (!applies) return;
-      hasData = true;
-      if (st.state !== "alert") return;
-      // класична тривога (ТА/авіація/обстріл) → червона; суті загрози (шахеди/КАБи/ракети) → жовта
-      const id = st.threat ? st.threat.id : "alert";
-      if (id === "drone" || id === "kab" || id === "missile") yellow = true;
-      else { red = true; chClassic = true; }
-    });
-    /* ЛИПКА ОФІЦІЙНА ТРИВОГА:
-       поки офіційний API НЕ скаже "відбій" — тривога лишається на карті,
-       навіть якщо канали замовкли (правило 1 хвилини тут не діє). */
-    if (red) stickyAlert[o.key] = true;
-    else if (official === false && !chClassic) stickyAlert[o.key] = false;
-    if (stickyAlert[o.key]) red = true;
-    oblastState[o.key] = red ? "alert" : yellow ? "threat" : (hasData ? "clear" : "nodata");
+    /* Лише офіційні дані (Ukraine Alarm): тривога є → червона, «відбій» → знімається одразу.
+       Пости Telegram-каналів більше не впливають — через них тривога трималась після відбою.
+       Якщо джерело недоступне (official === undefined) — лишаємо останній відомий стан. */
+    if (official === true) stickyAlert[o.key] = true;
+    else if (official === false) stickyAlert[o.key] = false;
+    const red = official === true || (official === undefined && !!stickyAlert[o.key]);
+    oblastState[o.key] = red ? "alert" : (official !== undefined ? "clear" : "nodata");
   });
   updateOblastStyles();
 }
@@ -140,6 +129,11 @@ async function loadOblasts() {
       .then(gj => {
         oblastLayers[o.key] = L.geoJSON(gj, { style: () => oblastStyle(o.key) }).addTo(map);
         oblastLayers[o.key].bindPopup(`<b>${o.name}</b>`);
+        /* назва області по центру — білим, як на офіційній мапі (видно лише на плоскій мапі, на великому масштабі ховається) */
+        try {
+          const short = o.key === "crimea" ? "А. Р. Крим" : o.name.replace(" область", "");
+          L.marker(oblastLayers[o.key].getBounds().getCenter(), { icon: L.divIcon({ className: "ob-label", html: "<span>" + short + "</span>", iconSize: [0, 0] }), pane: "labels", interactive: false, keyboard: false }).addTo(map);
+        } catch (e) {}
         // збираємо зовнішні контури
         const collect = geom => {
           if (!geom) return;

@@ -1,0 +1,16 @@
+{
+  "name": "Карта тривог України",
+  "short_name": "Тривоги",
+  "description": "Цілі та тривоги України у реальному часі",
+  "lang": "uk",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#181d26",
+  "theme_color": "#181d26",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

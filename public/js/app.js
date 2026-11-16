@@ -26,7 +26,10 @@ async function refreshAll() {
   if (errs) showErr(`⚠ ${errs} канал(ів) не вдалося прочитати — повторю спробу за хвилину`);
 }
 
-$("btnRefresh").onclick = refreshAll;
+/* Telegram-канали (старе джерело) вимкнено: 14 запитів кожні 20 с гальмували карту, а пости давали «липкі» тривоги.
+   Дані — офіційний Ukraine Alarm (області й райони) та dimap.live (цілі). true — повернути опитування каналів. */
+const USE_CHANNELS = false;
+$("btnRefresh").onclick = () => { if (USE_CHANNELS) refreshAll(); else { refreshOfficial(); refreshRaions(); refreshDimapTargets(); } };
 $("btnSound").onclick = () => {
   soundOn = !soundOn;
   $("btnSound").textContent = soundOn ? "🔊 Звук: увімк" : "🔇 Звук: вимк";
@@ -39,14 +42,14 @@ render();
 loadOblasts();
 
 /* кожен канал оновлюється сам, зі зсувом у 4с — рівномірне навантаження */
-CHANNELS.forEach((ch, i) => {
+if (USE_CHANNELS) CHANNELS.forEach((ch, i) => {
   setTimeout(() => {
     refreshChannel(ch);
     setInterval(() => refreshChannel(ch), REFRESH_MS);
   }, 1500 + i * STAGGER_MS);
 });
 refreshOfficial();
-setInterval(refreshOfficial, 45000);
+setInterval(refreshOfficial, 10000);   // області/сирена — кожні 10 с
 /* панель: ☰ згортає/розгортає; на телефоні за замовчуванням карта на весь екран */
 function toggleSidebar(force) {
   const sb = $("sidebar");
@@ -73,11 +76,12 @@ toggleSidebar(true);   // за замовчуванням видно лише к
 /* повернулися на вкладку — одразу оновлюємо все, не чекаючи таймерів */
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) return;
-  refreshAll(); refreshOfficial(); refreshRaions(); refreshDimapTargets();
+  if (USE_CHANNELS) refreshAll();
+  refreshOfficial(); refreshRaions(); refreshDimapTargets();
 });
 
 refreshRaions();
-setInterval(refreshRaions, 10000);          // тривоги по районах — кожні 10 с
+setInterval(refreshRaions, 5000);           // тривоги по районах — кожні 5 с
 refreshDimapTargets();
 setInterval(refreshDimapTargets, 5000);     // цілі — кожні 5 с, як у dimap
 setInterval(render, 15000);  // показники «свіжості» оновлюються з часом, навіть без нових постів

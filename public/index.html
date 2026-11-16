@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Карта тривог України у реальному часі (з Telegram)</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="css/app.css?v=6">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#181d26">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="css/app.css?v=13">
 <script>
 /* Сайт складається з окремих файлів (css/, js/), тому його не можна відкривати просто як файл — лише через сервер. */
 if (!/^https?:$/.test(location.protocol)) {
@@ -22,7 +25,7 @@ if (!/^https?:$/.test(location.protocol)) {
 <div id="app">
   <aside id="sidebar">
     <header>
-      <h1><span class="flag">🇺🇦</span> Карта тривог України</h1>
+      <h1><img src="icons/icon-192.png" alt="" style="width:28px;height:28px;vertical-align:middle;border-radius:50%"> Карта тривог України</h1>
       <div class="sub">Цілі та тривоги: dimap.live + офіційні джерела + Telegram-канали</div>
       <div class="badges">
         <span class="badge alert" id="bAlert">🔴 Тривога: 0</span>
@@ -33,6 +36,7 @@ if (!/^https?:$/.test(location.protocol)) {
       <div class="controls">
         <button id="btnSound">🔇 Звук: вимк</button>
         <button id="btnRefresh">⟳ Оновити</button>
+        <button id="btnInstall" style="display:none">📲 Встановити</button>
       </div>
       <div id="official" class="official">⏳ Офіційні тривоги: завантаження…</div>
       <div id="raions" class="official">⏳ Тривоги по районах: завантаження…</div>
@@ -50,17 +54,35 @@ if (!/^https?:$/.test(location.protocol)) {
     <!-- Три режими: 1) нормальна карта, 2) де зараз тривога, 3) що і куди летить -->
     <button id="btnRadius" title="Перевірити радіус навколо мене (до 150 км)">📍 Радіус</button>
     <div id="radiusPanel">
-      <div class="rp-head"><b>📍 Радіус перевірки</b><button id="radiusClose" title="Закрити">✕</button></div>
-      <div class="rp-range"><input type="range" id="radiusKm" min="5" max="150" step="5" value="20"><span id="radiusKmLabel">20 км</span></div>
-      <div class="rp-btns"><button id="radiusMe">Моє місце</button><button id="radiusPick">На карті</button></div>
-      <div id="radiusBot">
-        <div id="botLinked" style="display:none"><span>🤖 Бот підключено</span><button id="botUnlink">Відключити</button></div>
-        <label id="botFollowRow" style="display:none"><input type="checkbox" id="botFollow"> 📡 Постійна геолокація <small>(поки сайт відкритий)</small></label>
-        <button id="botConfirm" style="display:none">✅ Підтвердити радіус для бота</button>
-        <div id="botForm"><input id="botCode" maxlength="6" placeholder="Код з бота" autocomplete="off" autocapitalize="characters"><button id="botLink">🤖 Підключити бота</button></div>
-        <div id="botMsg"></div>
+      <div class="rp-head"><h2>Радар наближення</h2><button id="radiusClose" title="Закрити">✕</button></div>
+      <div class="rp-body">
+        <div class="rp-green">Тримайте мапу відкритою</div>
+        <div class="rp-card">
+          <b>Ваше місцеположення</b>
+          <p>Останню вибрану позицію збережено на цьому пристрої.</p>
+          <button id="radiusMe" class="rp-outline">Оновити позицію</button>
+          <button id="radiusPick" class="rp-outline rp-second">Вибрати на карті</button>
+        </div>
+        <div class="rp-label"><span>Радіус сповіщення</span><span id="radiusKmLabel">20 км</span></div>
+        <input type="range" id="radiusKm" min="5" max="150" step="5" value="20">
+        <div class="rp-scale"><span>5 км</span><span>150 км</span></div>
+        <div class="rp-label2">Не повторювати для тієї самої цілі частіше ніж</div>
+        <select id="radarRepeat"><option value="0">Завжди сповіщати</option><option value="5">5 хвилин</option><option value="15">15 хвилин</option><option value="30">30 хвилин</option></select>
+        <div class="rp-label2">Звук сповіщення</div>
+        <select id="radarSound"><option value="1">Звук 1</option><option value="2">Сирена</option><option value="off">Без звуку</option></select>
+        <a href="#" id="radarTest" class="rp-link">Перевірити звук</a>
+        <p class="rp-hint">Звук лунає лише коли показана ціль перетинає коло ззовні всередину. Цілі, які вже всередині, не сповіщають. Тримайте сторінку відкритою й активною: сповіщення у фоні не гарантовані.</p>
+        <div id="radiusStatus"></div>
+        <div id="radiusBot">
+          <div class="rp-label2">🤖 Telegram-бот</div>
+          <div id="botLinked" style="display:none"><span>Бот підключено</span><button id="botUnlink">Відключити</button></div>
+          <label id="botFollowRow" style="display:none"><input type="checkbox" id="botFollow"> 📡 Постійна геолокація <small>(поки сайт відкритий)</small></label>
+          <button id="botConfirm" style="display:none">Підтвердити радіус для бота</button>
+          <div id="botForm"><input id="botCode" maxlength="6" placeholder="Код з бота" autocomplete="off" autocapitalize="characters"><button id="botLink">Підключити бота</button></div>
+          <div id="botMsg"></div>
+        </div>
       </div>
-      <div id="radiusStatus"></div>
+      <div class="rp-foot"><button id="radiusOff" class="rp-btn">Вимкнути радар</button><button id="radiusSave" class="rp-btn rp-primary">Зберегти</button></div>
     </div>
     <div id="modeBar">
       <button data-layer="alerts" title="Показати / сховати райони в тривозі">🚨 Тривоги</button>
@@ -75,15 +97,18 @@ if (!/^https?:$/.test(location.protocol)) {
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="js/config.js?v=1"></script>
-<script src="js/places.js?v=1"></script>
-<script src="js/map.js?v=1"></script>
-<script src="js/oblasts.js?v=1"></script>
-<script src="js/network.js?v=1"></script>
+<script src="js/places.js?v=2"></script>
+<script src="js/map.js?v=2"></script>
+<script src="js/oblasts.js?v=5"></script>
+<script src="js/network.js?v=2"></script>
 <script src="js/ui.js?v=1"></script>
-<script src="js/official.js?v=1"></script>
-<script src="js/targets.js?v=1"></script>
-<script src="js/raions.js?v=1"></script>
-<script src="js/radius.js?v=6"></script>
-<script src="js/app.js?v=1"></script>
+<script src="js/official.js?v=3"></script>
+<script src="js/targets.js?v=12"></script>
+<script src="js/raions.js?v=7"></script>
+<script src="js/radius.js?v=8"></script>
+<script src="js/app.js?v=3"></script>
+<script src="js/panel.js?v=6"></script>
+<script src="js/threats.js?v=1"></script>
+<script src="js/install.js?v=1"></script>
 </body>
 </html>
