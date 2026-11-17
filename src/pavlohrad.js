@@ -1,11 +1,10 @@
 // Бот: попередження про цілі в радіусі 20–150 км від Павлограда і про повітряну тривогу в районі (Telegram).
-// Дані: цілі — dimap.live; тривоги — кілька джерел із запасними (src/sirens.js); балістика — канали (src/ballistic.js).
+// Дані: цілі — dimap.live (у т. ч. ракети/балістика — лише в радіусі чату); тривоги — кілька джерел (src/sirens.js).
 // Назовні (у повідомленнях) джерело одне — «наша карта». Cron запускає це щохвилини, а всередині запуску
 // перевірки йдуть кожні 2 с майже всю хвилину — затримка з нашого боку ≤ ~4 с.
 import { ensureWebhook } from "./telegram.js";
 import { kv } from "./store.js";
 import { listUsers, HOME } from "./link.js";
-import { checkBallistic, ballisticText } from "./ballistic.js";
 import { fetchSirens, geoOf, geoCached, seedGeo } from "./sirens.js";
 const SRC = "\n\nДжерело: наша карта — https://damih-havajsa.pp.ua/";   // єдина вказівка джерела в усіх повідомленнях
 export const CENTER = { ...HOME, name: "Павлоград" };
@@ -78,19 +77,10 @@ export function nearTargets(targets, now = Date.now(), c = CENTER, radiusKm = RA
   return out.sort((a, b) => a.km - b.km);
 }
 
-/* Балістика: типи з потоку цілей (точні назви залежать від джерела, тому ловимо за ключовими словами; крилаті — ні) */
-const BALL_KM = 300;
-/* Нерухомі «цілі» типу FPV / авіація (швидкість ~0) — це мітки на карті (де помічено/базується), а не політ у радіусі: бот про них не пише,
-   щоб не лякати «ФПВ за 10 км», коли нічого не летить. Рухомі цілі й усі інші типи (шахед, ракета, КАБ…) — як і раніше. */
+/* Нерухомі «цілі» типу FPV / авіація (швидкість ~0) — мітки на карті, а не політ: бот про них не пише. */
 export const isAlertable = t => (t.speed || 0) >= 5 || !/fpv|avia|plane|aircraft|tu-|su-/i.test(t.type || "");
-export const isBallisticType = t => /ballist|iskander|kinzhal|kn-?23|tochka|zircon|missile|rocket/i.test(t.type || "") && !/cruise|kalibr|kh-?\d|x-?\d/i.test(t.type || "");
-const DIRS = ["північ", "північний схід", "схід", "південний схід", "південь", "південний захід", "захід", "північний захід"];
-export function ballisticTargetText(list) {
-  const lines = list.map(t =>
-    ["Ракета / балістика — " + t.km.toFixed(0) + " км на " + t.from + " від " + CENTER.name + "а",
-      "   " + t.speed + " км/год, курс " + t.course + "°"].join("\n"));
-  return "🔴 БАЛІСТИКА — ДЕ ЛЕТИТЬ\n\n" + lines.join("\n\n") + "\n\n" + "⚠️ Негайно в укриття!" + SRC;
-}
+/* Балістика окремо НЕ розсилається: ракета в радіусі чату приходить звичайним сповіщенням (тип «Ракета / балістика»),
+   а розсилка «за 300 км» і переказ постів із каналів усім підряд прибрано — це був спам поза вибраним радіусом. */
 export const isUrgent = t => t.toward && t.etaMin != null && t.etaMin <= URGENT_MIN;
 
 /* Один рядок про ціль: «Шахед — 8.9 км, на півночі від вас» */
@@ -364,17 +354,6 @@ async function pass(env, st, users, save) {
       });
     }
   }
-  /* Балістика з потоку цілей: де летить — усім підписникам; про кожну ціль один раз */
-  const bl = nearTargets(tg.filter(isBallisticType), now, CENTER, BALL_KM);
-  const bTags = bl.map(t => t.id);
-  const prevB = st.ballT || [];
-  next.ballT = bTags.length ? [...new Set([...bTags, ...prevB.filter(x => bTags.includes(x))])] : [];
-  if (bTags.some(x => !prevB.includes(x))) {
-    await save(next);
-    const all = await allChats(env, users);
-    const bPhoto = env.WORKER_URL ? env.WORKER_URL.replace(/\/+$/, "") + "/icons/bot/missile.png" : null;
-    await inBatches(all, c => sendOne(env, c, ballisticTargetText(bl), true, bPhoto));
-  }
   await Promise.all(Object.keys(next.msgs).map(async c => {   // видаляємо повідомлення старші за 30 хв (паралельно)
     const left = await sweep(env, c, next.msgs[c]);
     if (left.length) next.msgs[c] = left; else delete next.msgs[c];
@@ -414,17 +393,6 @@ async function health(env, st, users, ok) {
   return st;
 }
 
-/* Загроза балістики з каналів → усім підписникам (особисті, групи, власні точки), без прив'язки до радіуса */
-async function ballisticPass(env, st, users, save) {
-  const { posts, seen } = await checkBallistic(st.ball);
-  st = { ...st, ball: seen };
-  if (!posts.length) return st;
-  await save(st);   // спершу фіксуємо «вже оголошено», потім розсилаємо
-  const all = await allChats(env, users);
-  for (const p of posts) await inBatches(all, c => sendOne(env, c, ballisticText(p)));
-  return st;
-}
-
 /* Запуск за розкладом (раз на хвилину): перевірки кожні PASS_EVERY_MS майже всю хвилину.
    Стан — в одному Durable Object (сильна узгодженість, без добових лімітів KV), у пам'яті на час запуску. */
 export async function run(env) {
@@ -434,9 +402,8 @@ export async function run(env) {
   const minute = Math.floor(Date.now() / 60000);
   let st;
   try {
-    const raw = (await DB.get("st")) || {};
-    st = { ...raw, msgs: raw.msgs && typeof raw.msgs === "object" ? raw.msgs : {}, ball: Array.isArray(raw.ball) ? raw.ball : [],
-      ballT: Array.isArray(raw.ballT) ? raw.ballT : [], down: +raw.down || 0, downSent: !!raw.downSent, sirens: Array.isArray(raw.sirens) ? raw.sirens : null,
+    const { ball, ballT, ...raw } = (await DB.get("st")) || {};   // ball/ballT — від прибраної розсилки балістики, більше не зберігаємо
+    st = { ...raw, msgs: raw.msgs && typeof raw.msgs === "object" ? raw.msgs : {}, down: +raw.down || 0, downSent: !!raw.downSent, sirens: Array.isArray(raw.sirens) ? raw.sirens : null,
       seen: raw.seen && typeof raw.seen === "object" ? raw.seen : undefined, empty: raw.empty || {}, lastSent: raw.lastSent || {} };
   } catch (e) { console.log("state load failed:", e && e.message); return; }   // без стану не діємо: краще пропустити запуск, ніж розіслати дублі
   let cfg = await loadConfig(env, null);
@@ -466,7 +433,6 @@ export async function run(env) {
     passes++;
     try {
       st = await pass(env, st, users, save);
-      if (i % 2 === 0) st = await ballisticPass(env, st, users, save).catch(e => { console.log("ballistic pass error", e && e.message); return st; });   // раз на 10 с
       await save(st);
     } catch (e) { errors++; console.log("bot pass error", e && e.message); }
   }
