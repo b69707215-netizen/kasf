@@ -419,7 +419,7 @@ async function health(env, st, users, ok) {
 
 /* Запуск за розкладом (раз на хвилину): перевірки кожні PASS_EVERY_MS майже всю хвилину.
    Стан — в одному Durable Object (сильна узгодженість, без добових лімітів KV), у пам'яті на час запуску. */
-export async function run(env) {
+export async function run(env, runMs = RUN_MS, first = true) {   // runMs — скільки триває цей запуск; first — лише перша частина хвилини робить разові справи
   if (!env.BOT_TOKEN) { console.log("bot: BOT_TOKEN не заданий"); return; }
   if (!env.BOT_STATE) { console.log("bot: Durable Object BOT_STATE не підключено — без нього не можна уникнути дублів"); return; }
   DB = env.BOT_STATE.get(env.BOT_STATE.idFromName("main"));
@@ -438,7 +438,7 @@ export async function run(env) {
   for (const [k, v] of Object.entries(dyn)) { dynStore.set(k.slice(3), v); DUMPS.set(k.slice(3), dumpOf(v)); }   // ключ — chat або chat|місто
   let users = attachDyn(cfg.users || [], dynStore);
   let last = dumpOf(st);
-  if (minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
+  if (first && minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
   /* Записуємо стан (лише зміни). Викликається і ПЕРЕД відправкою повідомлень: якщо запуск обірветься
      посеред розсилки, наступний уже знатиме, що ці цілі оголошено → без дублів. */
   const save = async s => {
@@ -450,7 +450,7 @@ export async function run(env) {
   const t0 = Date.now();
   let passes = 0, errors = 0;
   for (let i = 0; ; i++) {
-    if (i) { await sleep(PASS_EVERY_MS); if (Date.now() - t0 > RUN_MS) break; }
+    if (i) { await sleep(PASS_EVERY_MS); if (Date.now() - t0 > runMs) break; }
     if (i && i % 5 === 0) {   // кожні ~15 с перечитуємо підписників і налаштування (радіус/точку/код змінили в боті чи на карті)
       try { cfg = await loadConfig(env, cfg); SUBS = cfg.subs; users = attachDyn(cfg.users || [], dynStore); } catch (e) { console.log("config reload failed:", e && e.message); }
     }
