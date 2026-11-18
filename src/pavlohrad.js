@@ -217,7 +217,7 @@ async function loadConfig(env, prev) {
   catch (e) { console.log("subs load failed:", e && e.message); }
   try {
     const [own, menu] = await Promise.all([listUsers(env), loadMenuConfig(env)]);
-    users = [...own, ...menu.cityUsers].map(u => ({ ...u, key: u.key || u.chat, prefs: menu.prefs.get(u.chat) || null }));   // обрані міста — окремі центри
+    users = own.map(u => ({ ...u, key: u.key || u.chat, prefs: menu.prefs.get(u.chat) || null }));   // фільтри з пульта
   } catch (e) { console.log("users load failed:", e && e.message); }
   return { subs, users };
 }
