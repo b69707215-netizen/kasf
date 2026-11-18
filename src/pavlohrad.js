@@ -4,9 +4,9 @@
 // перевірки йдуть кожні 2 с майже всю хвилину — затримка з нашого боку ≤ ~4 с.
 import { ensureWebhook } from "./telegram.js";
 import { kv } from "./store.js";
-import { listUsers, HOME } from "./link.js";
+import { HOME } from "./link.js";
 import { fetchSirens, geoOf, geoCached, seedGeo } from "./sirens.js";
-import { loadMenuConfig, prefFilter } from "./menu.js";
+import { DEFAULT_PREFS, prefFilter } from "./menu.js";
 const SRC = "\n\nДжерело: наша карта — https://damih-havajsa.pp.ua/";   // єдина вказівка джерела в усіх повідомленнях
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
@@ -211,14 +211,20 @@ const DUMPS = new Map();       // chat → останній записаний �
 
 /* Підписники й користувачі — напряму з сховища (без кешу): зміни радіуса/точки підхоплюються за ~15 с */
 async function loadConfig(env, prev) {
-  const s = kv(env);
+  /* Одне читання сховища замість трьох (subs, u:*, p:*): на безкоштовному тарифі Worker має ліміт ~50 підзапитів за запуск,
+     а виклики Durable Object теж рахуються — інакше в другій половині хвилини падали запити до карти й тривог. */
   let subs = prev ? prev.subs : [], users = prev ? prev.users : [];
-  try { const a = JSON.parse((await s.get("subs")) || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
-  catch (e) { console.log("subs load failed:", e && e.message); }
   try {
-    const [own, menu] = await Promise.all([listUsers(env), loadMenuConfig(env)]);
-    users = own.map(u => ({ ...u, key: u.key || u.chat, prefs: menu.prefs.get(u.chat) || null }));   // фільтри з пульта
-  } catch (e) { console.log("users load failed:", e && e.message); }
+    const all = await kv(env).entries(""), prefs = new Map(), own = [];
+    for (const [k, v] of all) {
+      try {
+        if (k === "subs") { const a = JSON.parse(v || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
+        else if (k.startsWith("u:")) { const u = JSON.parse(v); if (u) own.push({ chat: k.slice(2), ...u }); }
+        else if (k.startsWith("p:")) prefs.set(k.slice(2), { ...DEFAULT_PREFS, ...JSON.parse(v) });
+      } catch {}
+    }
+    users = own.map(u => ({ ...u, key: u.chat, prefs: prefs.get(u.chat) || null }));   // фільтри з пульта
+  } catch (e) { console.log("config load failed:", e && e.message); }
   return { subs, users };
 }
 /* Стан тільки від радіуса (пороги залежать від km). Змінився радіус — скидаємо «оголошене», тож цілі, що вже в новому радіусі, буде оголошено одразу.
