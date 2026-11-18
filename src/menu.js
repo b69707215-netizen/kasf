@@ -1,9 +1,8 @@
-// Меню бота на інлайн-кнопках: обрані міста, налаштування сповіщень, «Що зараз у моїх містах», повідомлення про звук/проліт.
+// Меню бота на інлайн-кнопках: обрані міста, налаштування сповіщень, «Що зараз у моїх містах».
 // Сховище (Durable Object через kv()):
 //   "c:<chat>"  → ["dnipro", "pavlohrad", ...]  обрані міста (кожне — окремий центр із радіусом CITY_KM)
 //   "p:<chat>"  → { fmt: "photo"|"text", kab, ball, good }  налаштування
 //   "await:<chat>" → "search"  чекаємо назву міста (5 хв)
-//   "rep:<cityId>" / "repu:<chat>" — антиспам повідомлень про звук
 
 import { kv } from "./store.js";
 import { HOME } from "./link.js";
@@ -74,7 +73,7 @@ async function mainScreen(env, chat) {
     text: `👋 Вітаю! Це бот моніторингу загроз.\n\n📌 <b>Ваші обрані міста:</b> <code>${esc(cityList(ids))}</code>\n🔉 <b>Тип сповіщень:</b> <code>${fmtName(p)}</code>` +
       (ids.length ? "" : "\n\n<i>Поки міста не обрано — сповіщаю про цілі біля Павлограда (або біля вашої геолокації).</i>") +
       "\n\nОберіть потрібну дію за допомогою кнопок нижче:",
-    kb: [[{ text: "📍 Вибрати населений пункт", callback_data: "cp:0" }], [{ text: "📢 Повідомити про звук / проліт", callback_data: "rp" }],
+    kb: [[{ text: "📍 Вибрати населений пункт", callback_data: "cp:0" }],
       [{ text: "📊 Що зараз у моїх містах?", callback_data: "now" }], [{ text: "⚙️ Налаштувати бота", callback_data: "st" }],
       [{ text: "👥 Налаштування моїх груп", callback_data: "mg" }]]
   };
@@ -102,16 +101,6 @@ async function settingsScreen(env, chat) {
     kb: [[{ text: "Формат: " + fmtName(p), callback_data: "sf" }], [{ text: "💣 КАБи: " + on(p.kab), callback_data: "sk" }],
       [{ text: "🚀 Балістика / ракети: " + on(p.ball), callback_data: "sb" }], [{ text: "🐝 Добрі жужалки (відбої): " + on(p.good), callback_data: "sg" }],
       [{ text: "⬅️ Назад до головного меню", callback_data: "m" }]]
-  };
-}
-
-const REPORTS = { boom: "💥 Вибух", drone: "🛵 Звук дрона (мопед)", rocket: "🚀 Проліт ракети", jet: "✈️ Звук літака" };
-async function reportScreen(env, chat) {
-  const ids = await getCities(env, chat);
-  if (!ids.length) return { text: "Щоб повідомити про звук чи проліт, спершу оберіть своє місто.", kb: [[{ text: "📍 Вибрати населений пункт", callback_data: "cp:0" }], [{ text: "⬅️ Назад", callback_data: "m" }]] };
-  return {
-    text: `📢 Що ви чуєте / бачите? Повідомлення отримають інші користувачі, що обрали <b>${esc(BY_ID.get(ids[0]).name)}</b>.\n\n<i>Пишіть лише те, що чуєте самі. Фото й відео позицій ППО не публікуйте.</i>`,
-    kb: [...Object.entries(REPORTS).map(([k, t]) => [{ text: t, callback_data: "rr:" + k }]), [{ text: "⬅️ Назад", callback_data: "m" }]]
   };
 }
 
@@ -168,8 +157,8 @@ export async function handleCallback(env, cq) {
   const at = d.indexOf("@");
   if (at > 0) { chat = d.slice(at + 1); sfx = d.slice(at); d = d.slice(0, at); }   // меню групи, відкрите в особистому чаті
   if (chat !== here && Number(chat) >= 0) return;   // чужий особистий чат налаштовувати не можна
-  /* Група: налаштування — лише власник / адміністратори. «Що зараз» і звіти про звук — усім учасникам. */
-  if (Number(chat) < 0 && !["now", "noop", "rp", "rr"].some(x => d === x || d.startsWith(x + ":")) && !(await isAdmin(env, chat, uid))) {
+  /* Група: налаштування — лише власник / адміністратори. «Що зараз» — усім учасникам. */
+  if (Number(chat) < 0 && !["now", "noop"].some(x => d === x || d.startsWith(x + ":")) && !(await isAdmin(env, chat, uid))) {
     await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "Налаштовувати бота можуть лише адміністратори групи", show_alert: true });
     return;
   }
@@ -203,8 +192,6 @@ export async function handleCallback(env, cq) {
     toast = "Збережено";
     scr = await settingsScreen(env, chat);
   } else if (d === "now") { await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "Перевіряю…" }); await sendNow(env, chat, here, sfx); return; }
-  else if (d === "rp") scr = await reportScreen(env, chat);
-  else if (d.startsWith("rr:")) toast = await doReport(env, chat, d.slice(3), cq.from);
   await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: toast || undefined });
   if (scr && mid) await edit(env, here, mid, tag(scr, sfx));
 }
@@ -245,23 +232,4 @@ async function sendNow(env, chat, here = chat, sfx = "") {
       list.slice(0, 4).map(t => `  • ${NAMES[photoKind(t.type)]} — ${t.km.toFixed(1)} км, на ${t.from}${t.toward ? `, летить сюди (~${t.etaMin} хв)` : ""}`).join("\n");
   });
   await send(env, here, tag({ text: "📊 <b>Ситуація зараз</b>\n\n" + parts.join("\n\n") + "\n\n<i>За даними нашої карти. Офіційні тривоги — у застосунку «Повітряна тривога».</i>", kb: [[{ text: "🔄 Оновити", callback_data: "now" }, { text: "⬅️ Меню", callback_data: "m" }]] }, sfx));
-}
-
-/* Повідомлення користувача про звук / проліт → іншим, хто обрав те саме місто (антиспам: користувач — раз на 5 хв, місто+тип — раз на 2 хв) */
-async function doReport(env, chat, kind, from) {
-  if (!REPORTS[kind]) return "";
-  const ids = await getCities(env, chat);
-  if (!ids.length) return "Спершу оберіть місто";
-  const city = BY_ID.get(ids[0]);
-  if (await kv(env).get("repu:" + chat)) return "Ви вже повідомляли — спробуйте за кілька хвилин";
-  await kv(env).put("repu:" + chat, "1", { expirationTtl: 300 });
-  const dupKey = "rep:" + city.id + ":" + kind;
-  if (await kv(env).get(dupKey)) return "Дякуємо! Про це вже повідомили інші";
-  await kv(env).put(dupKey, "1", { expirationTtl: 120 });
-  const text = `📢 ${REPORTS[kind]} — ${city.name}\n<i>Повідомив користувач бота, не перевірено.</i>`;
-  const targets = [];
-  for (const [k, v] of await kv(env).entries("c:")) { const c = k.slice(2); if (c !== chat && parse(v, []).includes(city.id)) targets.push(c); }
-  for (let i = 0; i < targets.length; i += 25) await Promise.all(targets.slice(i, i + 25).map(c => api(env, "sendMessage", { chat_id: c, text, parse_mode: "HTML", disable_notification: true })));
-  if (env.ADMIN_CHAT_ID) await api(env, "sendMessage", { chat_id: env.ADMIN_CHAT_ID, text: text + `\nвід: ${esc((from && (from.username ? "@" + from.username : from.first_name)) || chat)}`, parse_mode: "HTML" });
-  return `Дякуємо! Надіслано ${targets.length} користувачам`;
 }
