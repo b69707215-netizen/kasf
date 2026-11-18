@@ -4,6 +4,7 @@
 
 import { issueCode, unlink, setRadiusFromBot, setLocationFromBot, setHomeFromBot } from "./link.js";
 import { kv } from "./store.js";
+import { handleCallback, handleSearchText, sendMainMenu } from "./menu.js";
 
 export async function tgApi(env, method, body) {
   if (body && body.reply_markup && Number(body.chat_id) < 0) body = { ...body, reply_markup: undefined };   // у групах кнопок-клавіатури немає
@@ -35,7 +36,7 @@ const GROUP_HELLO = "Привіт, група! 👋\n\nТепер пишу сю�
   "Якщо бот не бачить команд — зробіть його адміністратором групи. Зупинити — /stop";
 /* Кнопка «Відкрити карту» відкриває карту прямо в Telegram (веб-додаток; лише в особистих чатах). Адреса — з WORKER_URL. */
 const mapUrl = env => (env.WORKER_URL || "").replace(/\/+$/, "") + "/";
-const keyboard = env => ({ keyboard: [[{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }],
+const keyboard = env => ({ keyboard: [[{ text: "📋 Меню" }], [{ text: "📍 Моя геолокація", request_location: true }, { text: "📏 Радіус" }],
   [env.WORKER_URL ? { text: "🗺 Відкрити карту", web_app: { url: mapUrl(env) } } : { text: "🗺 Відкрити карту" }]], resize_keyboard: true, is_persistent: true });
 const RADIUS_KB = { keyboard: [[{ text: "📏 10 км" }, { text: "📏 20 км" }, { text: "📏 30 км" }], [{ text: "📏 50 км" }, { text: "📏 75 км" }, { text: "📏 100 км" }],
   [{ text: "📏 150 км" }, { text: "🏠 Павлоград" }, { text: "← Назад" }]], resize_keyboard: true };
@@ -61,6 +62,7 @@ export async function handleWebhook(request, env) {
     }
     return new Response("ok");
   }
+  if (update && update.callback_query) { await handleCallback(env, update.callback_query); return new Response("ok"); }   // інлайн-кнопки меню
   const live = !!(update && update.edited_message && update.edited_message.location);   // оновлення «живої» геолокації
   const m = update && (update.message || (live ? update.edited_message : null));
   if (!m || !m.chat) return new Response("ok");
@@ -75,12 +77,16 @@ export async function handleWebhook(request, env) {
   }
   if (!m.text) return new Response("ok");
   const chat = String(m.chat.id), text = m.text.trim().toLowerCase().replace(/@\w+/g, "").replace(/\s+/g, " ").trim();   // без @імені бота (команди в групах)
+  if (!text.startsWith("/") && !/^(📋|📏|🏠|←|🗺|📍)/.test(text) && await handleSearchText(env, chat, m.text.trim())) return new Response("ok");   // пошук міста
 
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
     const saved = subs.includes(chat) || await setSubs(env, [...subs, chat]);   // підписуємо цей чат на сповіщення
     await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env),
       text: saved ? (Number(chat) < 0 ? GROUP_HELLO : HELLO) : "⚠️ Не вдалося зберегти підписку (тимчасовий збій сховища). Надішліть /start ще раз за кілька хвилин." });
+    if (saved) await sendMainMenu(env, chat);
+  } else if (text === "📋 меню" || text.startsWith("/menu")) {
+    await sendMainMenu(env, chat);
   } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
     const km = await setHomeFromBot(env, chat);
     await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env), text: km ? `🏠 Центр — Павлоград, радіус ${km} км.` : "Сховище недоступне, спробуйте пізніше." });
@@ -105,19 +111,22 @@ export async function handleWebhook(request, env) {
       : "Сховище недоступне, спробуйте пізніше." });
   } else if (text.startsWith("/stop")) {
     await unlink(env, chat);
+    if (kv(env)) await kv(env).delete("c:" + chat);   // обрані міста теж знімаємо
     await setSubs(env, (await getSubs(env)).filter(c => c !== chat));
     await tgApi(env, "sendMessage", { chat_id: chat, text: BYE });
   }
   return new Response("ok");
 }
 
+const UPDATES = ["message", "edited_message", "my_chat_member", "callback_query"];   // callback_query — натискання інлайн-кнопок меню
+
 /* Автономність: раз на 30 хв перевіряємо webhook і, якщо він злетів або не наш, підключаємо знову (потрібен WORKER_URL у wrangler.jsonc) */
 export async function ensureWebhook(env) {
   if (!env.BOT_TOKEN || !env.WORKER_URL) return;
   const hook = env.WORKER_URL.replace(/\/+$/, "") + "/tg";
   const info = await (await tgApi(env, "getWebhookInfo", {})).json().catch(() => ({}));
-  if (info.ok && info.result && info.result.url === hook) return;
-  const body = { url: hook, allowed_updates: ["message", "edited_message", "my_chat_member"] };
+  if (info.ok && info.result && info.result.url === hook && (info.result.allowed_updates || []).includes("callback_query")) return;
+  const body = { url: hook, allowed_updates: UPDATES };
   if (env.WEBHOOK_SECRET && /^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) body.secret_token = env.WEBHOOK_SECRET;
   const r = await tgApi(env, "setWebhook", body);
   console.log("webhook restored", hook, r.status);
@@ -127,7 +136,7 @@ export async function ensureWebhook(env) {
 export async function setupWebhook(request, env) {
   if (!env.BOT_TOKEN) return new Response("BOT_TOKEN не задано (Settings → Variables and Secrets)", { status: 400 });
   const hook = new URL(request.url).origin + "/tg";
-  const body = { url: hook, allowed_updates: ["message", "edited_message", "my_chat_member"] };
+  const body = { url: hook, allowed_updates: UPDATES };
   if (env.WEBHOOK_SECRET) {
     // Telegram приймає секрет лише з латинських літер, цифр, «_» і «-» (1–256 символів)
     if (!/^[A-Za-z0-9_-]{1,256}$/.test(env.WEBHOOK_SECRET)) {

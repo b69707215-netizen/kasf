@@ -6,6 +6,7 @@ import { ensureWebhook } from "./telegram.js";
 import { kv } from "./store.js";
 import { listUsers, HOME } from "./link.js";
 import { fetchSirens, geoOf, geoCached, seedGeo } from "./sirens.js";
+import { loadMenuConfig, prefFilter } from "./menu.js";
 const SRC = "\n\nДжерело: наша карта — https://damih-havajsa.pp.ua/";   // єдина вказівка джерела в усіх повідомленнях
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
@@ -100,6 +101,16 @@ export const clearText = (km = RADIUS_KM, siren = false) => siren
 export const userClearText = (km, siren = false) => siren
   ? `🟡 Цілей у вашому радіусі ${km} км зараз немає, але повітряна тривога в районі ще триває — залишайтесь в укритті.${SRC}`
   : `🟣 ВІДБІЙ. У вашому радіусі ${km} км цілей більше немає.${SRC}`;
+
+/* Текст для обраного міста з меню */
+export function cityAlertText(city, list, km, total = list.length, thr = km) {
+  const lines = list.map(t => targetLine(t, "центру"));
+  const head = thr < km ? `🔴 ${city.toUpperCase()}: ціль ближче ${thr} км` : `🔴 ЗАГРОЗА: ${city} (до ${km} км)`;
+  return `${head}\n\n${lines.join("\n\n")}${total > list.length ? `\n\nУсього в радіусі: ${total}` : ""}${SRC}`;
+}
+export const cityClearText = (city, km, siren = false) => siren
+  ? `🟡 ${city}: цілей у радіусі ${km} км немає, але повітряна тривога ще триває — залишайтесь в укритті.${SRC}`
+  : `🟣 ВІДБІЙ — ${city}. У радіусі ${km} км цілей більше немає.${SRC}`;
 
 /* Текст для власної точки користувача (з карти або геолокації) */
 export function userAlertText(list, km, total = list.length, thr = km) {
@@ -204,8 +215,10 @@ async function loadConfig(env, prev) {
   let subs = prev ? prev.subs : [], users = prev ? prev.users : [];
   try { const a = JSON.parse((await s.get("subs")) || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
   catch (e) { console.log("subs load failed:", e && e.message); }
-  try { users = await listUsers(env); }
-  catch (e) { console.log("users load failed:", e && e.message); }
+  try {
+    const [own, menu] = await Promise.all([listUsers(env), loadMenuConfig(env)]);
+    users = [...own, ...menu.cityUsers].map(u => ({ ...u, key: u.key || u.chat, prefs: menu.prefs.get(u.chat) || null }));   // обрані міста — окремі центри
+  } catch (e) { console.log("users load failed:", e && e.message); }
   return { subs, users };
 }
 /* Стан тільки від радіуса (пороги залежать від km). Змінився радіус — скидаємо «оголошене», тож цілі, що вже в новому радіусі, буде оголошено одразу.
@@ -214,19 +227,19 @@ const sigOf = u => String(u.km);
 function attachDyn(list, dynStore) {
   return list.map(u => {
     const sig = sigOf(u);
-    let dd = dynStore.get(u.chat);
+    let dd = dynStore.get(u.key);
     if (!dd) dd = { sig };                              // зовсім новий чат — перший прохід лише запам'ятає цілі, без розсилки
-    else if (dd.sig !== sig) { dd = { sig, seen: {}, msgs: dd.msgs }; DUMPS.delete(u.chat); }   // змінили радіус — оголошуємо поточні цілі
-    dynStore.set(u.chat, dd);
+    else if (dd.sig !== sig) { dd = { sig, seen: {}, msgs: dd.msgs }; DUMPS.delete(u.key); }   // змінили радіус — оголошуємо поточні цілі
+    dynStore.set(u.key, dd);
     return { ...u, dyn: dd };
   });
 }
 async function saveDyn(u) {
   u.dyn.sig = sigOf(u);
   const d = dumpOf(u.dyn);
-  if (d === DUMPS.get(u.chat)) return;
-  await DB.put("ud:" + u.chat, u.dyn);
-  DUMPS.set(u.chat, d);
+  if (d === DUMPS.get(u.key)) return;
+  await DB.put("ud:" + u.key, u.dyn);
+  DUMPS.set(u.key, d);
 }
 
 /* Індивідуальні налаштування (власна точка або змінений радіус від Павлограда): користувачі обробляються паралельно */
@@ -236,7 +249,7 @@ async function passUsers(env, users, targets) {
 }
 async function passUser(env, u, targets, now) {
   const km = u.km, tiers = tiersFor(km);
-  const list = nearTargets(targets, now, { lat: u.lat, lng: u.lng }, km);
+  const list = nearTargets(targets, now, { lat: u.lat, lng: u.lng }, km).filter(prefFilter(u.prefs, photoKind));   // КАБи / балістика — за налаштуваннями
   const S = u.dyn;
   if (!S.seen) {   // перший запуск для цього чату: запам'ятовуємо поточні цілі без розсилки
     S.seen = Object.fromEntries(list.map(t => [t.id, { k: tierOf(t.km, tiers), t: now }]));
@@ -247,12 +260,14 @@ async function passUser(env, u, targets, now) {
   let msg = null, loud = true, photo = null;
   if (d.send) {
     const fr = d.fresh.map(x => x.t), thr = tiers[maxTier(d.fresh)];
-    msg = u.home ? alertText(fr, km, list.length, thr) : userAlertText(fr, km, list.length, thr);
+    msg = u.city ? cityAlertText(u.city, fr, km, list.length, thr) : u.home ? alertText(fr, km, list.length, thr) : userAlertText(fr, km, list.length, thr);
     photo = photoUrl(env, fr); S.lastSent = now;
   } else if (d.clear) {
     const g = geoCached(u.lat, u.lng), siren = !!(g && ACTIVE_SIRENS.has(g.r));
-    msg = u.home ? clearText(km, siren) : userClearText(km, siren); loud = false; photo = iconUrl(env, siren ? "alarm" : "clear");
+    msg = u.city ? cityClearText(u.city, km, siren) : u.home ? clearText(km, siren) : userClearText(km, siren); loud = false; photo = iconUrl(env, siren ? "alarm" : "clear");
+    if (u.prefs && !u.prefs.good) msg = null;                   // «Добрі жужалки» вимкнено — відбоїв не шлемо
   }
+  if (u.prefs && u.prefs.fmt === "text") photo = null;
   if (msg) await saveDyn(u);                                    // фіксуємо стан ДО відправки (проти дублів)
   if (msg) { const id = await sendOne(env, u.chat, msg, loud, photo); S.msgs = keepIds(S.msgs, id); }
   S.msgs = await sweep(env, u.chat, S.msgs);                    // видалення старих — після відправки, щоб не затримувати сповіщення
@@ -281,7 +296,7 @@ async function sirenPass(env, st, users, save) {
   const userRaion = new Map(), oblOf = new Map([[home, HOME_GEO.o]]);
   for (const u of users) {
     const g = await geoOf(env, DB, u.lat, u.lng);
-    if (g && g.r) { userRaion.set(u.chat, g.r); if (!oblOf.has(g.r)) oblOf.set(g.r, g.o); }
+    if (g && g.r) { userRaion.set(u.key, g.r); if (!oblOf.has(g.r)) oblOf.set(g.r, g.o); }
   }
   const watched = new Set(oblOf.keys());
   const active = r => s.areas.has(r) || (oblOf.get(r) && s.areas.has(oblOf.get(r)));
@@ -298,8 +313,11 @@ async function sirenPass(env, st, users, save) {
   for (const [r, on] of events) {
     const text = (on ? "🔴 ПОВІТРЯНА ТРИВОГА\n" : "🟣 ВІДБІЙ ТРИВОГИ\n") + r + SRC;
     if (r === home) await inBatches(defChats, async c => { const id = await sendOne(env, c, text, on, iconUrl(env, on ? "alarm" : "clear")); if (id) st.msgs[c] = keepIds(st.msgs[c], id); });
-    for (const u of users) if (userRaion.get(u.chat) === r) {
-      const id = await sendOne(env, u.chat, text, on, iconUrl(env, on ? "alarm" : "clear")).catch(() => null);
+    const done = new Set();   // кілька обраних міст в одному районі — одне повідомлення на чат
+    for (const u of users) if (userRaion.get(u.key) === r && !done.has(u.chat)) {
+      done.add(u.chat);
+      if (!on && u.prefs && !u.prefs.good) continue;
+      const id = await sendOne(env, u.chat, text, on, u.prefs && u.prefs.fmt === "text" ? null : iconUrl(env, on ? "alarm" : "clear")).catch(() => null);
       if (id) { u.dyn.msgs = keepIds(u.dyn.msgs, id); await saveDyn(u).catch(() => {}); }
     }
   }
@@ -411,7 +429,7 @@ export async function run(env) {
   let dyn = {};
   try { dyn = await DB.list("ud:"); } catch (e) { console.log("user state load failed:", e && e.message); }
   const dynStore = new Map();
-  for (const [k, v] of Object.entries(dyn)) { dynStore.set(k.slice(3), v); DUMPS.set(k.slice(3), dumpOf(v)); }
+  for (const [k, v] of Object.entries(dyn)) { dynStore.set(k.slice(3), v); DUMPS.set(k.slice(3), dumpOf(v)); }   // ключ — chat або chat|місто
   let users = attachDyn(cfg.users || [], dynStore);
   let last = dumpOf(st);
   if (minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
