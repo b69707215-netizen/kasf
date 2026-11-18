@@ -4,7 +4,7 @@
 
 import { issueCode, unlink, setRadiusFromBot, setLocationFromBot, setHomeFromBot } from "./link.js";
 import { kv } from "./store.js";
-import { handleCallback, handleSearchText, sendMainMenu } from "./menu.js";
+import { handleCallback, handleSearchText, sendMainMenu, registerGroup, forgetGroup } from "./menu.js";
 
 export async function tgApi(env, method, body) {
   if (body && body.reply_markup && Number(body.chat_id) < 0) body = { ...body, reply_markup: undefined };   // у групах кнопок-клавіатури немає
@@ -55,9 +55,11 @@ export async function handleWebhook(request, env) {
     if (st === "member" || st === "administrator") {
       const subs = await getSubs(env);
       if (!subs.includes(gid)) await setSubs(env, [...subs, gid]);
+      await registerGroup(env, gid, mcm.chat.title);   // група з'явиться в «Налаштування моїх груп» у її адмінів
       await tgApi(env, "sendMessage", { chat_id: gid, text: GROUP_HELLO });
     } else if (st === "left" || st === "kicked") {
       await unlink(env, gid);
+      await forgetGroup(env, gid);
       await setSubs(env, (await getSubs(env)).filter(c => c !== gid));
     }
     return new Response("ok");
@@ -75,9 +77,10 @@ export async function handleWebhook(request, env) {
       : "Не вдалося зберегти геолокацію, спробуйте пізніше." });
     return new Response("ok");
   }
+  if (m.chat.type !== "private") await registerGroup(env, String(m.chat.id), m.chat.title);   // групи, куди бота додали ще до цієї функції
   if (!m.text) return new Response("ok");
   const chat = String(m.chat.id), text = m.text.trim().toLowerCase().replace(/@\w+/g, "").replace(/\s+/g, " ").trim();   // без @імені бота (команди в групах)
-  if (!text.startsWith("/") && !/^(📋|📏|🏠|←|🗺|📍)/.test(text) && await handleSearchText(env, chat, m.text.trim())) return new Response("ok");   // пошук міста
+  if (!text.startsWith("/") && !/^(📋|📏|🏠|←|🗺|📍)/.test(text) && await handleSearchText(env, chat, m.text.trim(), m.from && m.from.id)) return new Response("ok");   // пошук міста
 
   if (text.startsWith("/start")) {
     const subs = await getSubs(env);
@@ -85,7 +88,7 @@ export async function handleWebhook(request, env) {
     await tgApi(env, "sendMessage", { chat_id: chat, reply_markup: keyboard(env),
       text: saved ? (Number(chat) < 0 ? GROUP_HELLO : HELLO) : "⚠️ Не вдалося зберегти підписку (тимчасовий збій сховища). Надішліть /start ще раз за кілька хвилин." });
     if (saved) await sendMainMenu(env, chat);
-  } else if (text === "📋 меню" || text.startsWith("/menu")) {
+  } else if (text === "📋 меню" || text.startsWith("/menu") || text.startsWith("/settings")) {
     await sendMainMenu(env, chat);
   } else if (text === "🏠 павлоград" || text.startsWith("/home")) {
     const km = await setHomeFromBot(env, chat);

@@ -61,12 +61,22 @@ const fmtName = p => p.fmt === "text" ? "📝 Текстові" : "🖼 З ка�
 
 async function mainScreen(env, chat) {
   const [ids, p] = await Promise.all([getCities(env, chat), getPrefs(env, chat)]);
+  if (Number(chat) < 0) {   // меню групи (відкрите в самій групі або з особистого чату через «Мої групи»)
+    const title = (await kv(env).get("g:" + chat)) || "група";
+    return {
+      text: `👥 <b>Налаштування групи «${esc(title)}»</b>\n\n📌 <b>Міста групи:</b> <code>${esc(cityList(ids))}</code>\n🔉 <b>Тип сповіщень:</b> <code>${fmtName(p)}</code>` +
+        (ids.length ? "" : "\n\n<i>Поки міста не обрано — пишу сюди про цілі біля Павлограда (радіус групи).</i>") + "\n\n<i>Змінювати можуть лише адміністратори групи.</i>",
+      kb: [[{ text: "📍 Міста групи", callback_data: "cp:0" }], [{ text: "⚙️ Налаштування сповіщень", callback_data: "st" }],
+        [{ text: "📊 Що зараз у містах групи?", callback_data: "now" }]]
+    };
+  }
   return {
     text: `👋 Вітаю! Це бот моніторингу загроз.\n\n📌 <b>Ваші обрані міста:</b> <code>${esc(cityList(ids))}</code>\n🔉 <b>Тип сповіщень:</b> <code>${fmtName(p)}</code>` +
       (ids.length ? "" : "\n\n<i>Поки міста не обрано — сповіщаю про цілі біля Павлограда (або біля вашої геолокації).</i>") +
       "\n\nОберіть потрібну дію за допомогою кнопок нижче:",
     kb: [[{ text: "📍 Вибрати населений пункт", callback_data: "cp:0" }], [{ text: "📢 Повідомити про звук / проліт", callback_data: "rp" }],
-      [{ text: "📊 Що зараз у моїх містах?", callback_data: "now" }], [{ text: "⚙️ Налаштувати бота", callback_data: "st" }]]
+      [{ text: "📊 Що зараз у моїх містах?", callback_data: "now" }], [{ text: "⚙️ Налаштувати бота", callback_data: "st" }],
+      [{ text: "👥 Налаштування моїх груп", callback_data: "mg" }]]
   };
 }
 
@@ -105,6 +115,25 @@ async function reportScreen(env, chat) {
   };
 }
 
+/* Групи, де користувач — власник або адміністратор (з тих, куди додано бота) */
+async function groupsScreen(env, userId) {
+  const all = await kv(env).entries("g:");
+  const mine = (await Promise.all(all.slice(0, 40).map(async ([k, title]) => (await isAdmin(env, k.slice(2), userId)) ? [k.slice(2), title] : null))).filter(Boolean);
+  if (!mine.length) return { text: "👥 Не знайдено груп, де ви адміністратор і є цей бот.\n\nДодайте бота в групу — вона з'явиться тут. У самій групі меню відкривається командою /menu (щоб бот бачив команди, зробіть його адміністратором).", kb: [[{ text: "⬅️ Назад до головного меню", callback_data: "m" }]] };
+  return { text: "👥 <b>Ваші групи</b>\n\nОберіть групу, щоб налаштувати сповіщення в ній:", kb: [...mine.map(([id, t]) => [{ text: "👥 " + t, callback_data: "m@" + id }]), [{ text: "⬅️ Назад до головного меню", callback_data: "m" }]] };
+}
+
+/* Чи може користувач налаштовувати групу: власник або адміністратор */
+async function isAdmin(env, group, userId) {
+  if (!userId) return false;
+  const r = await api(env, "getChatMember", { chat_id: group, user_id: userId });
+  if (!r || !r.ok) return false;
+  const j = await r.json().catch(() => null), st = j && j.result && j.result.status;
+  return st === "creator" || st === "administrator";
+}
+/* До кожної кнопки дописуємо «@<група>», якщо меню групи відкрито з особистого чату */
+const tag = (scr, sfx) => !sfx ? scr : { ...scr, kb: scr.kb.map(row => row.map(b => b.callback_data && !b.callback_data.includes("@") ? { ...b, callback_data: b.callback_data + sfx } : b)) };
+
 /* ---------- Telegram ---------- */
 async function api(env, method, body) {
   return fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
@@ -113,6 +142,12 @@ const send = (env, chat, s) => api(env, "sendMessage", { chat_id: chat, text: s.
 const edit = (env, chat, mid, s) => api(env, "editMessageText", { chat_id: chat, message_id: mid, text: s.text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: { inline_keyboard: s.kb } });
 
 export const sendMainMenu = async (env, chat) => send(env, chat, await mainScreen(env, chat));
+export async function registerGroup(env, chat, title) {
+  if (Number(chat) >= 0 || !kv(env)) return;
+  title = String(title || "Група").slice(0, 40);
+  if ((await kv(env).get("g:" + chat)) !== title) await kv(env).put("g:" + chat, title);
+}
+export async function forgetGroup(env, chat) { if (kv(env)) { await kv(env).delete("g:" + chat); await kv(env).delete("c:" + chat); await kv(env).delete("p:" + chat); } }
 
 /* Обрані міста замінюють Павлоград за замовчуванням: «домашній» запис u: видаляємо (власну геоточку лишаємо) */
 async function dropHomeDefault(env, chat) {
@@ -127,10 +162,21 @@ async function ensureOwnEntry(env, chat) {
 }
 
 export async function handleCallback(env, cq) {
-  const chat = String(cq.message && cq.message.chat && cq.message.chat.id || ""), mid = cq.message && cq.message.message_id, d = String(cq.data || "");
-  if (!chat) return;
+  const here = String(cq.message && cq.message.chat && cq.message.chat.id || ""), mid = cq.message && cq.message.message_id, uid = cq.from && cq.from.id;
+  if (!here) return;
+  let d = String(cq.data || ""), chat = here, sfx = "";
+  const at = d.indexOf("@");
+  if (at > 0) { chat = d.slice(at + 1); sfx = d.slice(at); d = d.slice(0, at); }   // меню групи, відкрите в особистому чаті
+  if (chat !== here && Number(chat) >= 0) return;   // чужий особистий чат налаштовувати не можна
+  /* Група: налаштування — лише власник / адміністратори. «Що зараз» і звіти про звук — усім учасникам. */
+  if (Number(chat) < 0 && !["now", "noop", "rp", "rr"].some(x => d === x || d.startsWith(x + ":")) && !(await isAdmin(env, chat, uid))) {
+    await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "Налаштовувати бота можуть лише адміністратори групи", show_alert: true });
+    return;
+  }
   let toast = "", scr = null;
-  if (d === "m") scr = await mainScreen(env, chat);
+  if (d === "mg") scr = await groupsScreen(env, uid);
+  else if (d === "noop") {}
+  else if (d === "m") scr = await mainScreen(env, chat);
   else if (d.startsWith("cp:")) scr = await citiesScreen(env, chat, +d.slice(3));
   else if (d.startsWith("ct:")) {
     const [, id, page] = d.split(":");
@@ -143,8 +189,8 @@ export async function handleCallback(env, cq) {
     }
     scr = await citiesScreen(env, chat, +page);
   } else if (d === "cs") {
-    await kv(env).put("await:" + chat, "search", { expirationTtl: 300 });
-    await api(env, "sendMessage", { chat_id: chat, text: "🔍 Напишіть назву населеного пункту (або її частину):" });
+    await kv(env).put("await:" + here, JSON.stringify({ uid, chat }), { expirationTtl: 300 });
+    await api(env, "sendMessage", { chat_id: here, text: "🔍 Напишіть назву населеного пункту (або її частину):" });
   } else if (d === "st") scr = await settingsScreen(env, chat);
   else if (["sf", "sk", "sb", "sg"].includes(d)) {
     const p = await getPrefs(env, chat);
@@ -156,27 +202,29 @@ export async function handleCallback(env, cq) {
     await ensureOwnEntry(env, chat);
     toast = "Збережено";
     scr = await settingsScreen(env, chat);
-  } else if (d === "now") { toast = "Перевіряю…"; await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: toast }); await sendNow(env, chat); return; }
+  } else if (d === "now") { await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: "Перевіряю…" }); await sendNow(env, chat, here, sfx); return; }
   else if (d === "rp") scr = await reportScreen(env, chat);
   else if (d.startsWith("rr:")) toast = await doReport(env, chat, d.slice(3), cq.from);
   await api(env, "answerCallbackQuery", { callback_query_id: cq.id, text: toast || undefined });
-  if (scr && mid) await edit(env, chat, mid, scr);
+  if (scr && mid) await edit(env, here, mid, tag(scr, sfx));
 }
 
 /* Текстове повідомлення в режимі пошуку. true — оброблено тут. */
-export async function handleSearchText(env, chat, raw) {
-  if ((await kv(env).get("await:" + chat)) !== "search") return false;
-  await kv(env).delete("await:" + chat);
+export async function handleSearchText(env, here, raw, fromId) {
+  const w = parse(await kv(env).get("await:" + here), null);
+  if (!w || typeof w !== "object" || (w.uid && fromId && w.uid !== fromId)) return false;   // у групі пошук веде лише той, хто натиснув «Знайти»
+  await kv(env).delete("await:" + here);
+  const chat = String(w.chat || here), sfx = chat !== here ? "@" + chat : "";
   const q = raw.toLowerCase().replace(/[’ʼ‘`]/g, "'").trim();
   const found = CITIES.filter(c => c.name.toLowerCase().includes(q) || (c.alias && c.alias.includes(q))).slice(0, 8);
-  if (!found.length) { await send(env, chat, { text: `Нічого не знайдено за «${esc(raw)}». Спробуйте іншу назву або поділіться геолокацією (кнопка «📍 Моя геолокація»).`, kb: [[{ text: "📍 До списку міст", callback_data: "cp:0" }]] }); return true; }
+  if (!found.length) { await send(env, here, { text: `Нічого не знайдено за «${esc(raw)}». Спробуйте іншу назву або поділіться геолокацією (кнопка «📍 Моя геолокація»).`, kb: [[{ text: "📍 До списку міст", callback_data: "cp:0" + sfx }]] }); return true; }
   const sel = new Set(await getCities(env, chat));
-  await send(env, chat, { text: "Знайдено — натисніть, щоб додати або прибрати:", kb: [...found.map(c => [{ text: (sel.has(c.id) ? "✅ " : "📍 ") + c.name, callback_data: `ct:${c.id}:${Math.floor(CITIES.indexOf(c) / PER_PAGE)}` }]), [{ text: "⬅️ Назад до головного меню", callback_data: "m" }]] });
+  await send(env, here, tag({ text: "Знайдено — натисніть, щоб додати або прибрати:", kb: [...found.map(c => [{ text: (sel.has(c.id) ? "✅ " : "📍 ") + c.name, callback_data: `ct:${c.id}:${Math.floor(CITIES.indexOf(c) / PER_PAGE)}` }]), [{ text: "⬅️ Назад до головного меню", callback_data: "m" }]] }, sfx));
   return true;
 }
 
 /* «Що зараз у моїх містах?» — цілі навколо кожного міста за даними карти */
-async function sendNow(env, chat) {
+async function sendNow(env, chat, here = chat, sfx = "") {
   const { nearTargets, photoKind } = await import("./pavlohrad.js");
   const ids = await getCities(env, chat), p = await getPrefs(env, chat);
   let centers = ids.map(id => BY_ID.get(id));
@@ -186,7 +234,7 @@ async function sendNow(env, chat) {
   }
   let targets = null;
   try { const r = await fetch("https://api.dimap.live/api/targets", { headers: { "User-Agent": "radf4-pavlohrad-bot" }, signal: AbortSignal.timeout(5000) }); if (r.ok) targets = (await r.json()).targets; } catch {}
-  if (!Array.isArray(targets)) { await api(env, "sendMessage", { chat_id: chat, text: "⚠️ Зараз не вдалося отримати дані карти. Спробуйте за хвилину." }); return; }
+  if (!Array.isArray(targets)) { await api(env, "sendMessage", { chat_id: here, text: "⚠️ Зараз не вдалося отримати дані карти. Спробуйте за хвилину." }); return; }
   const NAMES = { missile: "Ракета / балістика", cruise: "Крилата ракета", shahed: "Шахед", reactive: "Реактивний шахед", lancet: "Ланцет", kab: "КАБ", fpv: "FPV-дрон", avia: "Авіація", other: "Ціль" };
   const ok = prefFilter(p, photoKind);
   const parts = centers.map(c => {
@@ -196,7 +244,7 @@ async function sendNow(env, chat) {
     return `${inR.length ? "🔴" : "🟡"} <b>${esc(c.name)}</b>: ${inR.length ? `у радіусі ${km} км — ${inR.length}` : `поруч (до 30 км) — ${list.length}`}\n` +
       list.slice(0, 4).map(t => `  • ${NAMES[photoKind(t.type)]} — ${t.km.toFixed(1)} км, на ${t.from}${t.toward ? `, летить сюди (~${t.etaMin} хв)` : ""}`).join("\n");
   });
-  await send(env, chat, { text: "📊 <b>Ситуація зараз</b>\n\n" + parts.join("\n\n") + "\n\n<i>За даними нашої карти. Офіційні тривоги — у застосунку «Повітряна тривога».</i>", kb: [[{ text: "🔄 Оновити", callback_data: "now" }, { text: "⬅️ Меню", callback_data: "m" }]] });
+  await send(env, here, tag({ text: "📊 <b>Ситуація зараз</b>\n\n" + parts.join("\n\n") + "\n\n<i>За даними нашої карти. Офіційні тривоги — у застосунку «Повітряна тривога».</i>", kb: [[{ text: "🔄 Оновити", callback_data: "now" }, { text: "⬅️ Меню", callback_data: "m" }]] }, sfx));
 }
 
 /* Повідомлення користувача про звук / проліт → іншим, хто обрав те саме місто (антиспам: користувач — раз на 5 хв, місто+тип — раз на 2 хв) */
