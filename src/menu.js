@@ -5,7 +5,7 @@
 //   "g:<chat>" → назва групи (для «Мої групи»)
 
 import { kv } from "./store.js";
-import { HOME, setRadiusFromBot, setHomeFromBot, issueCode } from "./link.js";
+import { HOME, setRadiusFromBot, setHomeFromBot } from "./link.js";
 
 export const DEFAULT_PREFS = { fmt: "photo", kab: true, ball: true, good: true };
 const RADII = [5, 10, 15, 20, 30, 50, 75, 100, 150];
@@ -41,12 +41,13 @@ const mapUrl = env => (env.WORKER_URL || "").replace(/\/+$/, "") + "/";
 async function mainScreen(env, chat) {
   const [c, p] = await Promise.all([getCenter(env, chat), getPrefs(env, chat)]);
   const group = Number(chat) < 0;
-  const head = group ? `👥 <b>Пульт групи «${esc((await kv(env).get("g:" + chat)) || "група")}»</b>` : "🛰 <b>Пульт сповіщень</b>";
+  const g = group ? groupName((await kv(env).get("g:" + chat)) || "група") : null;
+  const head = group ? `${g.icon} <b>Пульт ${g.channel ? "каналу" : "групи"} «${esc(g.title)}»</b>` : "🛰 <b>Пульт сповіщень</b>";
   const text = `${head}\n${LINE}\n🎯 Центр: <b>${esc(c.name)}</b>\n📏 Радіус: <b>${c.km} км</b>\n🔔 Надсилаю: ${what(p)}\n🖼 Вигляд: ${p.fmt === "text" ? "лише текст" : "з картинкою"}\n${LINE}` +
     (group ? "\n<i>Змінюють лише адміністратори групи.</i>" : "");
-  const kb = [[{ text: "🎯 Центр", callback_data: "c" }, { text: "📏 Радіус", callback_data: "r" }], [{ text: "🔔 Фільтри", callback_data: "f" }, { text: "📡 Обстановка", callback_data: "now" }]];
+  const kb = [[{ text: "📍 Моя геолокація", callback_data: "c" }, { text: "📏 Радіус", callback_data: "r" }], [{ text: "🔔 Фільтри", callback_data: "f" }, { text: "📡 Обстановка", callback_data: "now" }]];
   if (!group) {
-    kb.push([{ text: "👥 Мої групи", callback_data: "mg" }]);
+    kb.push([{ text: "👥 Мої групи й канали", callback_data: "mg" }]);
     if (env.WORKER_URL) kb.push([{ text: "🗺 Відкрити карту", web_app: { url: mapUrl(env) } }]);
   }
   return { text, kb };
@@ -54,13 +55,14 @@ async function mainScreen(env, chat) {
 
 async function centerScreen(env, chat) {
   const c = await getCenter(env, chat), group = Number(chat) < 0;
-  const how = group
-    ? "Свій центр для групи: натисніть «🔑 Код для карти», відкрийте карту → 📍 Радіус → «Підключити бота» і введіть код."
-    : "• <b>Геолокація</b> — кнопка «📍 Моя геолокація» внизу екрана (для руху за вами: 📎 → Геопозиція → «Поділитися геопозицією»).\n• <b>Точка з карти</b> — «🔑 Код для карти», далі на карті 📍 Радіус → «Підключити бота».";
-  return {
-    text: `🎯 <b>Центр сповіщень</b>\n${LINE}\nЗараз: <b>${esc(c.name)}</b>, радіус ${c.km} км\n${LINE}\n${how}`,
-    kb: [[{ text: (c.own ? "" : "● ") + "🏠 Павлоград", callback_data: "ch" }, { text: "🔑 Код для карти", callback_data: "cc" }], [{ text: "↩️ Пульт", callback_data: "m" }]]
-  };
+  const g = group ? groupName((await kv(env).get("g:" + chat)) || "") : null;
+  const how = !group ? "Натисніть «📍 Надіслати геолокацію» — кнопка з'явиться внизу екрана.\nЩоб центр рухався за вами: 📎 → Геопозиція → «Поділитися геопозицією»."
+    : g.channel ? "Для каналу центр — Павлоград (геолокацію в канал надіслати не можна). Радіус змінюється в «📏 Радіус»."
+    : "Адміністратор надсилає геолокацію прямо в групу: 📎 → Геопозиція.";
+  const kb = [];
+  if (!group) kb.push([{ text: "📍 Надіслати геолокацію", callback_data: "cl" }]);
+  kb.push([{ text: (c.own ? "" : "● ") + "🏠 Павлоград", callback_data: "ch" }], [{ text: "↩️ Пульт", callback_data: "m" }]);
+  return { text: `📍 <b>Геолокація</b>\n${LINE}\nЦентр зараз: <b>${esc(c.name)}</b>, радіус ${c.km} км\n${LINE}\n${how}`, kb };
 }
 
 async function radiusScreen(env, chat) {
@@ -85,12 +87,15 @@ async function filtersScreen(env, chat) {
 async function groupsScreen(env, userId) {
   const all = await kv(env).entries("g:");
   const mine = (await Promise.all(all.slice(0, 40).map(async ([k, title]) => (await isAdmin(env, k.slice(2), userId)) ? [k.slice(2), title] : null))).filter(Boolean);
-  if (!mine.length) return { text: `👥 <b>Мої групи</b>\n${LINE}\nПоки немає груп, де ви адміністратор і є цей бот.\n\nДодайте бота в групу — вона з'явиться тут. У самій групі пульт відкривається командою /menu.`, kb: [[{ text: "↩️ Пульт", callback_data: "m" }]] };
-  return { text: `👥 <b>Мої групи</b>\n${LINE}\nОберіть групу:`, kb: [...mine.map(([id, t]) => [{ text: "👥 " + t, callback_data: "m@" + id }]), [{ text: "↩️ Пульт", callback_data: "m" }]] };
+  if (!mine.length) return { text: `👥 <b>Мої групи й канали</b>\n${LINE}\nПоки немає груп чи каналів, де ви адміністратор і є цей бот.\n\n• Група: додайте бота в групу (краще адміністратором). У самій групі пульт — /menu.\n• Канал: додайте бота адміністратором каналу з правом публікації.`, kb: [[{ text: "↩️ Пульт", callback_data: "m" }]] };
+  return { text: `👥 <b>Мої групи й канали</b>\n${LINE}\nОберіть, що налаштувати:`, kb: [...mine.map(([id, t]) => { const g = groupName(t); return [{ text: g.icon + " " + g.title, callback_data: "m@" + id }]; }), [{ text: "↩️ Пульт", callback_data: "m" }]] };
 }
 
-/* Чи може користувач налаштовувати групу: власник або адміністратор */
-async function isAdmin(env, group, userId) {
+/* Назва в реєстрі: канали зберігаються з позначкою «📢 » на початку */
+const groupName = v => { v = String(v || ""); const channel = v.startsWith("📢 "); return { channel, title: channel ? v.slice(3) : v, icon: channel ? "📢" : "👥" }; };
+
+/* Чи може користувач налаштовувати групу / канал: власник або адміністратор */
+export async function isAdmin(env, group, userId) {
   if (!userId) return false;
   const r = await api(env, "getChatMember", { chat_id: group, user_id: userId });
   if (!r || !r.ok) return false;
@@ -112,9 +117,9 @@ const send = (env, chat, s) => api(env, "sendMessage", { chat_id: chat, text: s.
 const edit = (env, chat, mid, s) => api(env, "editMessageText", { chat_id: chat, message_id: mid, text: s.text, parse_mode: "HTML", disable_web_page_preview: true, reply_markup: { inline_keyboard: clean(chat, s.kb) } });
 
 export const sendMainMenu = async (env, chat) => send(env, chat, await mainScreen(env, chat));
-export async function registerGroup(env, chat, title) {
+export async function registerGroup(env, chat, title, channel = false) {
   if (Number(chat) >= 0 || !kv(env)) return;
-  title = String(title || "Група").slice(0, 40);
+  title = (channel ? "📢 " : "") + String(title || (channel ? "Канал" : "Група")).slice(0, 40);
   if ((await kv(env).get("g:" + chat)) !== title) await kv(env).put("g:" + chat, title);
 }
 export async function forgetGroup(env, chat) { if (kv(env)) { await kv(env).delete("g:" + chat); await kv(env).delete("p:" + chat); } }
@@ -142,9 +147,8 @@ export async function handleCallback(env, cq) {
     else if (d === "mg") scr = await groupsScreen(env, uid);
     else if (d === "c") scr = await centerScreen(env, chat);
     else if (d === "ch") { await setHomeFromBot(env, chat); toast = "Центр — Павлоград"; scr = await centerScreen(env, chat); }
-    else if (d === "cc") {
-      const code = await issueCode(env, chat);
-      await api(env, "sendMessage", { chat_id: here, parse_mode: "HTML", text: code ? `🔑 Код для карти (натисніть, щоб скопіювати):\n\n<code>${code}</code>\n\nКарта → 📍 Радіус → «Підключити бота» → введіть код. Діє 10 хвилин.` : "Сховище недоступне, спробуйте пізніше." });
+    else if (d === "cl" && Number(here) > 0) {   // кнопка запиту геолокації буває лише в нижній клавіатурі — показуємо її на один раз
+      await api(env, "sendMessage", { chat_id: here, text: "Натисніть кнопку внизу 👇", reply_markup: { keyboard: [[{ text: "📍 Надіслати геолокацію", request_location: true }], [{ text: "↩️ Скасувати" }]], resize_keyboard: true, one_time_keyboard: true } });
     }
     else if (d === "r") scr = await radiusScreen(env, chat);
     else if (d.startsWith("r:")) { const res = await setRadiusFromBot(env, chat, +d.slice(2)); toast = res === "range" ? "Радіус 5–150 км" : `Радіус ${res.km} км`; scr = await radiusScreen(env, chat); }

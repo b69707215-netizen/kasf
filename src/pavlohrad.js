@@ -4,9 +4,9 @@
 // перевірки йдуть кожні 2 с майже всю хвилину — затримка з нашого боку ≤ ~4 с.
 import { ensureWebhook } from "./telegram.js";
 import { kv } from "./store.js";
-import { listUsers, HOME } from "./link.js";
+import { HOME } from "./link.js";
 import { fetchSirens, geoOf, geoCached, seedGeo } from "./sirens.js";
-import { loadMenuConfig, prefFilter } from "./menu.js";
+import { DEFAULT_PREFS, prefFilter } from "./menu.js";
 const SRC = "\n\nДжерело: наша карта — https://damih-havajsa.pp.ua/";   // єдина вказівка джерела в усіх повідомленнях
 export const CENTER = { ...HOME, name: "Павлоград" };
 export const RADIUS_KM = 20;   // типовий радіус (особисті чати); у групах — 30, див. DEFAULT_KM
@@ -211,14 +211,20 @@ const DUMPS = new Map();       // chat → останній записаний �
 
 /* Підписники й користувачі — напряму з сховища (без кешу): зміни радіуса/точки підхоплюються за ~15 с */
 async function loadConfig(env, prev) {
-  const s = kv(env);
+  /* Одне читання сховища замість трьох (subs, u:*, p:*): на безкоштовному тарифі Worker має ліміт ~50 підзапитів за запуск,
+     а виклики Durable Object теж рахуються — інакше в другій половині хвилини падали запити до карти й тривог. */
   let subs = prev ? prev.subs : [], users = prev ? prev.users : [];
-  try { const a = JSON.parse((await s.get("subs")) || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
-  catch (e) { console.log("subs load failed:", e && e.message); }
   try {
-    const [own, menu] = await Promise.all([listUsers(env), loadMenuConfig(env)]);
-    users = own.map(u => ({ ...u, key: u.key || u.chat, prefs: menu.prefs.get(u.chat) || null }));   // фільтри з пульта
-  } catch (e) { console.log("users load failed:", e && e.message); }
+    const all = await kv(env).entries(""), prefs = new Map(), own = [];
+    for (const [k, v] of all) {
+      try {
+        if (k === "subs") { const a = JSON.parse(v || "[]"); subs = Array.isArray(a) ? a.map(String) : []; }
+        else if (k.startsWith("u:")) { const u = JSON.parse(v); if (u) own.push({ chat: k.slice(2), ...u }); }
+        else if (k.startsWith("p:")) prefs.set(k.slice(2), { ...DEFAULT_PREFS, ...JSON.parse(v) });
+      } catch {}
+    }
+    users = own.map(u => ({ ...u, key: u.chat, prefs: prefs.get(u.chat) || null }));   // фільтри з пульта
+  } catch (e) { console.log("config load failed:", e && e.message); }
   return { subs, users };
 }
 /* Стан тільки від радіуса (пороги залежать від km). Змінився радіус — скидаємо «оголошене», тож цілі, що вже в новому радіусі, буде оголошено одразу.
@@ -413,7 +419,7 @@ async function health(env, st, users, ok) {
 
 /* Запуск за розкладом (раз на хвилину): перевірки кожні PASS_EVERY_MS майже всю хвилину.
    Стан — в одному Durable Object (сильна узгодженість, без добових лімітів KV), у пам'яті на час запуску. */
-export async function run(env) {
+export async function run(env, runMs = RUN_MS, first = true) {   // runMs — скільки триває цей запуск; first — лише перша частина хвилини робить разові справи
   if (!env.BOT_TOKEN) { console.log("bot: BOT_TOKEN не заданий"); return; }
   if (!env.BOT_STATE) { console.log("bot: Durable Object BOT_STATE не підключено — без нього не можна уникнути дублів"); return; }
   DB = env.BOT_STATE.get(env.BOT_STATE.idFromName("main"));
@@ -432,7 +438,7 @@ export async function run(env) {
   for (const [k, v] of Object.entries(dyn)) { dynStore.set(k.slice(3), v); DUMPS.set(k.slice(3), dumpOf(v)); }   // ключ — chat або chat|місто
   let users = attachDyn(cfg.users || [], dynStore);
   let last = dumpOf(st);
-  if (minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
+  if (first && minute % 30 === 0) await ensureWebhook(env).catch(e => console.log("webhook check error", e && e.message));   // самолікування webhook раз на 30 хв
   /* Записуємо стан (лише зміни). Викликається і ПЕРЕД відправкою повідомлень: якщо запуск обірветься
      посеред розсилки, наступний уже знатиме, що ці цілі оголошено → без дублів. */
   const save = async s => {
@@ -444,7 +450,7 @@ export async function run(env) {
   const t0 = Date.now();
   let passes = 0, errors = 0;
   for (let i = 0; ; i++) {
-    if (i) { await sleep(PASS_EVERY_MS); if (Date.now() - t0 > RUN_MS) break; }
+    if (i) { await sleep(PASS_EVERY_MS); if (Date.now() - t0 > runMs) break; }
     if (i && i % 5 === 0) {   // кожні ~15 с перечитуємо підписників і налаштування (радіус/точку/код змінили в боті чи на карті)
       try { cfg = await loadConfig(env, cfg); SUBS = cfg.subs; users = attachDyn(cfg.users || [], dynStore); } catch (e) { console.log("config reload failed:", e && e.message); }
     }
